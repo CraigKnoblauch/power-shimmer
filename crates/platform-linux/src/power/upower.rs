@@ -200,11 +200,122 @@ fn update_online(state: &SharedState, online: Option<bool>) {
 
 #[cfg(test)]
 mod tests {
+    use zbus::connection::Builder;
+    use zbus::interface;
+    use zbus::names::OwnedUniqueName;
+    use zbus::Connection;
+
     use super::*;
+
+    const DISPLAY_DEVICE_PATH: &str = "/org/freedesktop/UPower/devices/DisplayDevice";
+    const UPOWER_DEVICE_INTERFACE: &str = "org.freedesktop.UPower.Device";
+
+    struct MockUpowerRoot;
+
+    #[interface(name = "org.freedesktop.UPower")]
+    impl MockUpowerRoot {}
+
+    struct MockDisplayDevice {
+        on_battery: bool,
+    }
+
+    #[interface(name = "org.freedesktop.UPower.Device")]
+    impl MockDisplayDevice {
+        #[zbus(property)]
+        fn on_battery(&self) -> bool {
+            self.on_battery
+        }
+    }
+
+    async fn mock_modern_upower_bus() -> (Connection, OwnedUniqueName) {
+        let server = Builder::session()
+            .expect("session bus")
+            .serve_at(UPOWER_PATH, MockUpowerRoot)
+            .expect("serve root UPower object")
+            .serve_at(
+                DISPLAY_DEVICE_PATH,
+                MockDisplayDevice { on_battery: false },
+            )
+            .expect("serve DisplayDevice")
+            .build()
+            .await
+            .expect("mock UPower server connection");
+
+        let destination = server
+            .unique_name()
+            .expect("mock UPower unique bus name")
+            .clone();
+        let client = Connection::session()
+            .await
+            .expect("session bus client connection");
+
+        std::mem::forget(server);
+        (client, destination)
+    }
 
     #[test]
     fn new_backend_starts_without_panic() {
         let backend = UpowerBackend::new();
         let _ = backend.initial_source();
+    }
+
+    /// Modern UPower (≥ 0.99.x) omits root `OnLine` but exposes `OnBattery` on
+    /// `DisplayDevice`. AC online should be inferred as `OnBattery == false`.
+    #[tokio::test]
+    async fn modern_upower_without_root_online_reads_ac_from_display_device() {
+        let (connection, destination) = mock_modern_upower_bus().await;
+
+        let root_properties = PropertiesProxy::builder(&connection)
+            .destination(destination.clone())
+            .expect("UPower destination")
+            .path(UPOWER_PATH)
+            .expect("UPower path")
+            .build()
+            .await
+            .expect("root PropertiesProxy");
+
+        let display_properties = PropertiesProxy::builder(&connection)
+            .destination(destination)
+            .expect("UPower destination")
+            .path(DISPLAY_DEVICE_PATH)
+            .expect("DisplayDevice path")
+            .build()
+            .await
+            .expect("DisplayDevice PropertiesProxy");
+
+        let root_interface =
+            InterfaceName::try_from(UPOWER_INTERFACE).expect("UPower interface name");
+        let device_interface =
+            InterfaceName::try_from(UPOWER_DEVICE_INTERFACE).expect("UPower device interface");
+
+        assert!(
+            root_properties
+                .get(root_interface.clone(), "OnLine")
+                .await
+                .is_err(),
+            "mock must omit legacy root OnLine to represent modern UPower"
+        );
+
+        let on_battery_value = display_properties
+            .get(device_interface, "OnBattery")
+            .await
+            .expect("DisplayDevice OnBattery");
+        let on_battery =
+            bool::try_from(on_battery_value).expect("OnBattery bool");
+        assert!(
+            !on_battery,
+            "mock DisplayDevice must report on AC power (OnBattery=false)"
+        );
+
+        let online = read_upower_online(&root_properties)
+            .await
+            .expect("read should not hard-fail when root OnLine is absent");
+
+        assert_eq!(
+            online,
+            Some(true),
+            "UPower is reachable and DisplayDevice reports AC; read_upower_online must \
+             return Some(true) instead of None"
+        );
     }
 }
