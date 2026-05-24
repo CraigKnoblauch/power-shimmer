@@ -48,7 +48,8 @@ impl WgpuShimmerRenderer {
     #[must_use]
     pub fn new() -> Self {
         let controller = Arc::new(SessionController::new());
-        let (ready_tx, ready_rx) = std::sync::mpsc::sync_channel::<EventLoopProxy<OverlayUserEvent>>(1);
+        let (ready_tx, ready_rx) =
+            std::sync::mpsc::sync_channel::<EventLoopProxy<OverlayUserEvent>>(1);
         let controller_thread = Arc::clone(&controller);
 
         thread::Builder::new()
@@ -56,9 +57,7 @@ impl WgpuShimmerRenderer {
             .spawn(move || {
                 let event_loop = build_overlay_event_loop();
                 let proxy = event_loop.create_proxy();
-                ready_tx
-                    .send(proxy.clone())
-                    .expect("overlay ready signal");
+                ready_tx.send(proxy.clone()).expect("overlay ready signal");
                 let mut app = OverlayApp::new(controller_thread, proxy);
                 event_loop.set_control_flow(winit::event_loop::ControlFlow::Poll);
                 if let Err(err) = event_loop.run_app(&mut app) {
@@ -86,9 +85,7 @@ impl Default for WgpuShimmerRenderer {
 
 impl Drop for WgpuShimmerRenderer {
     fn drop(&mut self) {
-        let _ = self
-            .proxy
-            .send_event(OverlayUserEvent::Shutdown);
+        let _ = self.proxy.send_event(OverlayUserEvent::Shutdown);
     }
 }
 
@@ -140,7 +137,9 @@ impl OverlayRenderer for WgpuShimmerRenderer {
                     }
                 })
                 .await;
-                Err(OverlayError::RenderFailed("overlay play timed out".to_string()))
+                Err(OverlayError::RenderFailed(
+                    "overlay play timed out".to_string(),
+                ))
             }
         }
     }
@@ -166,9 +165,9 @@ mod tests {
     use std::sync::Arc;
     use std::time::Duration;
 
-    use power_shimmer_core::{OverlayError, ShimmerConfig, ShimmerRequest, ShimmerTrigger};
     use super::*;
     use crate::overlay::render_loop::require_x11_session;
+    use power_shimmer_core::{OverlayError, ShimmerConfig, ShimmerRequest, ShimmerTrigger};
 
     fn sample_request() -> ShimmerRequest {
         ShimmerRequest {
@@ -216,8 +215,10 @@ mod tests {
         }
 
         let renderer = Arc::new(WgpuShimmerRenderer::new());
-        let mut config = ShimmerConfig::default();
-        config.duration_ms = 5_000;
+        let config = ShimmerConfig {
+            duration_ms: 5_000,
+            ..ShimmerConfig::default()
+        };
         let request = ShimmerRequest {
             config,
             trigger: ShimmerTrigger::Manual,

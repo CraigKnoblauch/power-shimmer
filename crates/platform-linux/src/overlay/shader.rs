@@ -5,9 +5,7 @@ use std::path::Path;
 use bytemuck::{Pod, Zeroable};
 use power_shimmer_core::ShimmerConfig;
 use wgpu::util::DeviceExt;
-use wgpu::{
-    Device, Queue, RenderPipeline, ShaderModule, SurfaceConfiguration, TextureFormat,
-};
+use wgpu::{Device, Queue, RenderPipeline, ShaderModule, SurfaceConfiguration, TextureFormat};
 
 /// CPU mirror of [`super::SHADER_SOURCE`] `ShimmerParams` uniform block.
 #[repr(C)]
@@ -30,9 +28,7 @@ impl ShimmerParams {
         Self {
             elapsed_s,
             #[allow(clippy::cast_precision_loss)]
-            duration_s: {
-                config.duration_ms as f32 / 1000.0
-            },
+            duration_s: { config.duration_ms as f32 / 1000.0 },
             opacity: config.opacity,
             speed: config.speed,
         }
@@ -173,8 +169,10 @@ pub fn shader_asset_path() -> std::path::PathBuf {
 }
 
 /// WGSL source embedded at compile time.
-pub const SHADER_SOURCE: &str =
-    include_str!(concat!(env!("CARGO_MANIFEST_DIR"), "/../../assets/shaders/shimmer.wgsl"));
+pub const SHADER_SOURCE: &str = include_str!(concat!(
+    env!("CARGO_MANIFEST_DIR"),
+    "/../../assets/shaders/shimmer.wgsl"
+));
 
 /// Preferred surface format for premultiplied alpha overlays.
 #[must_use]
@@ -223,10 +221,12 @@ mod tests {
 
     #[test]
     fn from_config_maps_duration_ms_to_seconds() {
-        let mut config = ShimmerConfig::default();
-        config.duration_ms = 2500;
-        config.opacity = 0.5;
-        config.speed = 2.0;
+        let config = ShimmerConfig {
+            duration_ms: 2500,
+            opacity: 0.5,
+            speed: 2.0,
+            ..ShimmerConfig::default()
+        };
         let params = ShimmerParams::from_config(&config, 1.25);
         assert!((params.duration_s - 2.5).abs() < f32::EPSILON);
         assert!((params.opacity - 0.5).abs() < f32::EPSILON);

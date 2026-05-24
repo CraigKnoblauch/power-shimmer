@@ -39,12 +39,14 @@ A laptop on **Linux (X11 + UPower)** can run `power-shimmer` as a background uti
 | Overlay (X11 + wgpu) | Done | `WgpuShimmerRenderer`; `wgpu_shimmer.rs`, `render_loop.rs`, `session.rs`, `shader.rs`, `x11_click_through.rs`; winit **X11-only**; `assets/shaders/shimmer.wgsl` |
 | Overlay adapter tests | Done | Session + shader unit tests; `cancel_when_idle`; GPU/X11 tests `#[ignore]` in `wgpu_shimmer.rs` |
 | Overlay X11 smoke test | Wired, ignored | `tests/overlay_x11_smoke.rs`; run with `--ignored` on X11 + GPU |
-| App (CLI, tray, wiring, config) | Not started | `main` prints placeholder message |
+| App (CLI, tray, wiring, config) | Done | `config.rs`, `cli.rs`, `wiring.rs`, `tray.rs`, `logging.rs`; TOML + clap + tokio daemon/`--trigger`; `tray` feature (`tray-icon` without `libxdo`) |
+| App config tests | Done | 7 unit + 2 integration in `app/tests/config_test.rs` |
 | Orchestrator unit tests (SPEC table) | Done | All 8 SPEC rows + shutdown in `orchestrator_test.rs` |
 | Mock overlay unit tests (SPEC) | Done | `is_playing`, `Cancelled`, completion covered in `mock_overlay.rs` unit tests |
 | Linux power smoke test | Wired, ignored | `linux_power_smoke.rs` uses `LinuxPowerBackend::select()`; run with `--ignored` on hardware |
+| End-to-end manual validation | Pending | Phase 5 — `--trigger`, AC plug shimmer, tray actions on real X11 session |
 
-**Reference implementation today:** `cargo test -p power-shimmer-core` — **20 tests green** (policy, mocks, full orchestrator SPEC table). `cargo test -p power-shimmer-platform-linux` — **16 tests green**, 3 ignored (2 GPU/X11 unit tests + overlay smoke + power smoke). Phases **1–3 complete** (overlay not yet wired in app). Production paths: power `LinuxPowerBackend::select()` → `LinuxPowerListener`; overlay `WgpuShimmerRenderer` (X11 + wgpu, Wayland deferred v1.1).
+**Reference implementation today:** `./scripts/check.sh` green (fmt, clippy, build, test). **Phases 1–4 complete.** Production wiring: `LinuxPowerBackend::select()` → `LinuxPowerListener` + `WgpuShimmerRenderer` → `ShimmerOrchestrator` in `app/wiring.rs`. Binary: `cargo run -p power-shimmer-app` (`power-shimmer`). Test summary: `power-shimmer-core` **20**, `power-shimmer-platform-linux` **16** (+ 3 ignored GPU/hardware), `power-shimmer-app` **9** — **45 automated**, 3 ignored manual smokes.
 
 ---
 
@@ -66,22 +68,23 @@ flowchart TD
         H[Debounce + adapter tests]
         J[X11 window + click-through]
         K[wgpu shader + play/cancel]
-    end
-    subgraph p4 [Phase 4 — Ship]
         L[Config TOML]
         M[App wiring + CLI]
         N[Tray menu]
-        O[Smoke test + polish]
+    end
+    subgraph p5 [Phase 5 — Harden]
+        O[E2E manual matrix]
+        P[Error paths + polish]
     end
     A --> B --> C --> D --> E
     E --> F --> G --> H
     E --> I --> J --> K
     H --> L
     K --> L
-    L --> M --> N --> O
+    L --> M --> N --> O --> P
 ```
 
-Phases 2 and 3 can proceed in parallel once Phase 1 lands; Phase 4 requires both. **Phases 2 and 3 are complete** — proceed with Phase 4 (app wiring, CLI, tray, end-to-end `--trigger`).
+Phases 2 and 3 can proceed in parallel once Phase 1 lands; Phase 4 required both. **Phases 1–4 are complete** — proceed with Phase 5 (manual E2E matrix, error-path hardening, v1 tag prep).
 
 ---
 
@@ -110,7 +113,7 @@ Phases 2 and 3 can proceed in parallel once Phase 1 lands; Phase 4 requires both
 | # | Task | SPEC / files | Acceptance | Status |
 |---|------|----------------|------------|--------|
 | 2.1 | `UpowerBackend` implements `PowerSourceBackend` | `power/upower.rs`, `zbus` | Reads `OnLine`; maps to `PowerSource` | **Done** |
-| 2.2 | Wire `LinuxPowerListener::new(UpowerBackend::…)` | App wiring (Phase 4) or integration test | `InitialState` reflects live state in integration | **Partial** — smoke test wired; app composition root in Phase 4 |
+| 2.2 | Wire `LinuxPowerListener::new(UpowerBackend::…)` | `app/wiring.rs` | `InitialState` reflects live state in integration | **Done** — composition root + smoke test |
 | 2.3 | `SysfsFallbackBackend` | `power/sysfs_fallback.rs` | Same event protocol; selected when UPower unavailable | **Done** |
 | 2.4 | Backend selection | `power/mod.rs` (`LinuxPowerBackend::select`) | UPower preferred; sysfs when D-Bus unavailable | **Done** |
 | 2.5 | Debounce coalescing (400 ms) | `power/listener.rs` | Two rapid `online` toggles within 400 ms → **one** `Transition` | **Done** |
@@ -118,7 +121,7 @@ Phases 2 and 3 can proceed in parallel once Phase 1 lands; Phase 4 requires both
 | 2.7 | Unit test: debounce coalescing | `power/listener.rs` tests | Mock backend pushes flicker; assert single transition | **Done** |
 | 2.8 | Enable `linux_power_smoke` (ignored → run on CI/hardware) | `tests/linux_power_smoke.rs` | Manual/CI: plug AC → receive `Transition(Battery, Ac)` | **Partial** — test wired; still `#[ignore]` until CI/hardware run |
 
-**Exit criteria:** Daemon can subscribe to real power on a Linux laptop; listener still does **not** decide shimmer policy. **Met** (pending Phase 4 daemon wiring and manual smoke run).
+**Exit criteria:** Daemon subscribes to real power on a Linux laptop; listener does **not** decide shimmer policy. **Met** (daemon wired in app; manual AC-plug E2E in Phase 5).
 
 ---
 
@@ -135,9 +138,9 @@ Phases 2 and 3 can proceed in parallel once Phase 1 lands; Phase 4 requires both
 | 3.5 | WGSL rainbow + shimmer band | `assets/shaders/shimmer.wgsl` | Honors `duration_ms`, `opacity`, `speed` ± one frame | **Done** |
 | 3.6 | Teardown ≤ 500 ms | `overlay/session.rs`, render loop | Resources released after complete or cancel | **Done** |
 | 3.7 | Mock overlay unit tests in `core` or `platform-linux` | SPEC overlay tests | `is_playing`, `Cancelled`, completion | **Done** (core `mock_overlay.rs` + adapter session/shader tests) |
-| 3.8 | Manual test: `power-shimmer --trigger` | App (Phase 4) | Visible shimmer without power event | **Pending** (Phase 4) |
+| 3.8 | Manual test: `power-shimmer --trigger` | `app/wiring.rs` | Visible shimmer without power event | **Partial** — wired; confirm on X11 + GPU (Phase 5) |
 
-**Exit criteria:** Orchestrator + real overlay completes end-to-end on X11; `wayland_layer_shell.rs` remains stubbed. **Met** for adapter crate (pending Phase 4 composition root and manual `--trigger` / AC plug E2E).
+**Exit criteria:** Orchestrator + real overlay completes end-to-end on X11; `wayland_layer_shell.rs` remains stubbed. **Met** (adapter + app wiring; manual `--trigger` / AC-plug confirmation in Phase 5).
 
 ---
 
@@ -145,19 +148,19 @@ Phases 2 and 3 can proceed in parallel once Phase 1 lands; Phase 4 requires both
 
 **Objective:** User-facing binary wires everything together.
 
-| # | Task | SPEC / files | Acceptance |
-|---|------|----------------|------------|
-| 4.1 | TOML config load + defaults | `app/config.rs`, `config/` | `ShimmerConfig` + orchestrator flags |
-| 4.2 | `clap` CLI | SPEC CLI table | `--trigger`, `--dry-run`, `--no-tray`, `--duration-ms`, `--opacity` |
-| 4.3 | Composition root | `app/wiring.rs` | Builds UPower listener, X11 overlay, orchestrator |
-| 4.4 | Tokio runtime + task spawn | TECH_STACK | Power loop in background; overlay on orchestrator tasks |
-| 4.5 | Entry paths | SPEC | `--trigger` → manual play + exit; default → daemon |
-| 4.6 | System tray | `app/tray.rs`, `tray-icon` | Play now / Enable auto / Quit → orchestrator calls |
-| 4.7 | Logging | `tracing` | Dry-run and trigger paths log intent |
-| 4.8 | `scripts/check.sh` in CI / docs | README | Format, clippy, test, deny (if configured) |
-| 4.9 | Update README status | — | Reflects v1 shipped capabilities |
+| # | Task | SPEC / files | Acceptance | Status |
+|---|------|----------------|------------|--------|
+| 4.1 | TOML config load + defaults | `app/config.rs`, `config/` | `ShimmerConfig` + orchestrator flags | **Done** |
+| 4.2 | `clap` CLI | SPEC CLI table | `--trigger`, `--dry-run`, `--no-tray`, `--duration-ms`, `--opacity` | **Done** |
+| 4.3 | Composition root | `app/wiring.rs` | Builds UPower listener, X11 overlay, orchestrator | **Done** |
+| 4.4 | Tokio runtime + task spawn | TECH_STACK | Power loop in background; overlay on orchestrator tasks | **Done** |
+| 4.5 | Entry paths | SPEC | `--trigger` → manual play + exit; default → daemon | **Done** |
+| 4.6 | System tray | `app/tray.rs`, `tray-icon` | Play now / Enable auto / Quit → orchestrator calls | **Done** |
+| 4.7 | Logging | `tracing` | Dry-run and trigger paths log intent | **Done** |
+| 4.8 | `scripts/check.sh` in CI / docs | README, `.github/workflows/ci.yml` | Format, clippy, build, test; CI installs GTK tray deps | **Done** |
+| 4.9 | Update README status | README | Reflects v1 shipped capabilities | **Done** |
 
-**Exit criteria:** `cargo run -p power-shimmer-app` (or project binary name) runs daemon on X11; unplug/replug AC triggers shimmer when auto is enabled.
+**Exit criteria:** `cargo run -p power-shimmer-app` runs daemon on X11; unplug/replug AC triggers shimmer when auto is enabled. **Met** (automated tests + build green; manual AC-plug matrix tracked in Phase 5).
 
 ---
 
@@ -194,22 +197,33 @@ Phases 2 and 3 can proceed in parallel once Phase 1 lands; Phase 4 requires both
 | Overlay Renderer adapter | `platform-linux` | `overlay/wgpu_shimmer.rs`, `render_loop.rs`, `session.rs`, `shader.rs`, `x11_click_through.rs` | Done |
 | Shimmer Orchestrator | `core` | `services/shimmer_orchestrator.rs`, `services/policy.rs` | Done |
 | Test doubles | `core` | `testing/mock_power.rs`, `testing/mock_overlay.rs` | Done |
-| CLI / tray / wiring | `app` | `main.rs`, `wiring.rs`, `tray.rs`, `config.rs` | 4 |
+| CLI / tray / wiring | `app` | `main.rs`, `wiring.rs`, `tray.rs`, `config.rs`, `cli.rs` | Done |
 
 ---
 
 ## Suggested next step
 
-**Phases 2 and 3 are complete.** Next slice:
+**Phases 1–4 are complete.** Next slice:
 
-- **Phase 4:** App wiring — `LinuxPowerBackend::select()` + `WgpuShimmerRenderer` + orchestrator daemon loop, CLI (`--trigger`), tray
+- **Phase 5:** End-to-end manual test matrix on real hardware (X11 + UPower), error-path hardening, SPEC/README sync, optional packaging notes
 
 ```bash
+./scripts/check.sh
+
+# Run the daemon (tray + power loop)
+cargo run -p power-shimmer-app
+
+# One-shot shimmer (requires X11 DISPLAY + GPU)
+cargo run -p power-shimmer-app -- --trigger
+
+# Automated crate tests
 cargo test -p power-shimmer-core
 cargo test -p power-shimmer-platform-linux
-# Manual overlay (X11 DISPLAY + GPU):
+cargo test -p power-shimmer-app
+
+# Manual smokes (ignored in CI)
 cargo test -p power-shimmer-platform-linux overlay_x11 -- --ignored --nocapture
-# Manual power (hardware / UPower):
 cargo test -p power-shimmer-platform-linux linux_power_smoke -- --ignored --nocapture
-./scripts/check.sh
 ```
+
+**Tray build deps (Linux):** `pkg-config`, `libgtk-3-dev`, `libayatana-appindicator3-dev` (or `libappindicator3-dev`). `libxdo-dev` not required (`tray-icon` built with `default-features = false`).

@@ -1,4 +1,4 @@
-//! Integration smoke test for Linux power listener — requires UPower (v1).
+//! Integration smoke test for Linux power listener — requires `UPower` (v1).
 
 use std::time::Duration;
 
@@ -29,6 +29,6 @@ fn linux_power_smoke_receives_initial_state() {
                 "unexpected initial source: {source:?}"
             );
         }
-        other => panic!("expected InitialState first, got {other:?}"),
+        PowerEvent::Transition { .. } => panic!("expected InitialState first, got transition"),
     }
 }

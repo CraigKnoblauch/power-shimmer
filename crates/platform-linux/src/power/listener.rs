@@ -157,19 +157,11 @@ mod tests {
         }
 
         fn try_wait_online_change(&self, timeout: Duration) -> Option<()> {
-            self.change_rx
-                .lock()
-                .unwrap()
-                .recv_timeout(timeout)
-                .ok()
+            self.change_rx.lock().unwrap().recv_timeout(timeout).ok()
         }
     }
 
-    fn recv_event(
-        stream: &PowerEventStream,
-        timeout: Duration,
-        label: &str,
-    ) -> PowerEvent {
+    fn recv_event(stream: &PowerEventStream, timeout: Duration, label: &str) -> PowerEvent {
         match stream.recv_timeout(timeout) {
             StreamRecvResult::Message(Ok(event)) => event,
             StreamRecvResult::Message(Err(error)) => panic!("{label} error: {error}"),
@@ -192,11 +184,7 @@ mod tests {
             }
         };
 
-        handle_event(recv_event(
-            &stream,
-            Duration::from_secs(1),
-            "initial event",
-        ));
+        handle_event(recv_event(&stream, Duration::from_secs(1), "initial event"));
         handle_event(recv_event(
             &stream,
             Duration::from_secs(1),
@@ -228,11 +216,7 @@ mod tests {
             }
         );
 
-        let transition = recv_event(
-            &stream,
-            Duration::from_secs(1),
-            "coalesced transition",
-        );
+        let transition = recv_event(&stream, Duration::from_secs(1), "coalesced transition");
         assert_eq!(
             transition,
             PowerEvent::Transition {
@@ -242,12 +226,11 @@ mod tests {
         );
 
         match stream.recv_timeout(Duration::from_millis(100)) {
-            StreamRecvResult::Timeout => {}
             StreamRecvResult::Message(Ok(event)) => {
                 panic!("expected one coalesced transition, got extra event: {event:?}")
             }
             StreamRecvResult::Message(Err(error)) => panic!("unexpected stream error: {error}"),
-            StreamRecvResult::Disconnected => {}
+            StreamRecvResult::Timeout | StreamRecvResult::Disconnected => {}
         }
     }
 
@@ -272,11 +255,7 @@ mod tests {
             }
 
             fn try_wait_online_change(&self, timeout: Duration) -> Option<()> {
-                self.change_rx
-                    .lock()
-                    .unwrap()
-                    .recv_timeout(timeout)
-                    .ok()
+                self.change_rx.lock().unwrap().recv_timeout(timeout).ok()
             }
         }
 

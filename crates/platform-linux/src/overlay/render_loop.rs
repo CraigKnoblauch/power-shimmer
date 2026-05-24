@@ -54,7 +54,10 @@ pub struct OverlayApp {
 impl OverlayApp {
     /// Creates the app state used by [`run_overlay_event_loop`].
     #[must_use]
-    pub fn new(controller: Arc<SessionController>, proxy: EventLoopProxy<OverlayUserEvent>) -> Self {
+    pub fn new(
+        controller: Arc<SessionController>,
+        proxy: EventLoopProxy<OverlayUserEvent>,
+    ) -> Self {
         Self {
             controller,
             proxy,
@@ -89,9 +92,7 @@ impl OverlayApp {
         done: tokio::sync::oneshot::Sender<Result<(), OverlayError>>,
     ) {
         if self.gpu.is_some() {
-            let _ = done.send(Err(OverlayError::RenderFailed(
-                "overlay busy".to_string(),
-            )));
+            let _ = done.send(Err(OverlayError::RenderFailed("overlay busy".to_string())));
             return;
         }
 
@@ -137,11 +138,13 @@ impl OverlayApp {
             }
         };
 
-        let Some(adapter) = pollster::block_on(instance.request_adapter(&wgpu::RequestAdapterOptions {
-            power_preference: wgpu::PowerPreference::LowPower,
-            compatible_surface: Some(&surface),
-            force_fallback_adapter: false,
-        })) else {
+        let Some(adapter) =
+            pollster::block_on(instance.request_adapter(&wgpu::RequestAdapterOptions {
+                power_preference: wgpu::PowerPreference::LowPower,
+                compatible_surface: Some(&surface),
+                force_fallback_adapter: false,
+            }))
+        else {
             self.controller.finish_session();
             let _ = done.send(Err(OverlayError::RenderFailed(
                 "no suitable GPU adapter".to_string(),
@@ -176,7 +179,10 @@ impl OverlayApp {
 
         let size = window.inner_size();
         let mut config = shader::surface_config(size.width, size.height, format);
-        if caps.alpha_modes.contains(&wgpu::CompositeAlphaMode::PreMultiplied) {
+        if caps
+            .alpha_modes
+            .contains(&wgpu::CompositeAlphaMode::PreMultiplied)
+        {
             config.alpha_mode = wgpu::CompositeAlphaMode::PreMultiplied;
         } else if let Some(&mode) = caps.alpha_modes.first() {
             config.alpha_mode = mode;
@@ -220,7 +226,8 @@ impl OverlayApp {
         }
 
         let size = session.window.inner_size();
-        if size.width > 0 && size.height > 0
+        if size.width > 0
+            && size.height > 0
             && (session.config.width != size.width || session.config.height != size.height)
         {
             session.config.width = size.width;
@@ -234,9 +241,7 @@ impl OverlayApp {
         let frame = match session.surface.get_current_texture() {
             Ok(f) => f,
             Err(wgpu::SurfaceError::Lost | wgpu::SurfaceError::Outdated) => {
-                session
-                    .surface
-                    .configure(&session.device, &session.config);
+                session.surface.configure(&session.device, &session.config);
                 return;
             }
             Err(e) => {
@@ -248,12 +253,11 @@ impl OverlayApp {
         let view = frame
             .texture
             .create_view(&wgpu::TextureViewDescriptor::default());
-        let mut encoder =
-            session
-                .device
-                .create_command_encoder(&wgpu::CommandEncoderDescriptor {
-                    label: Some("shimmer_encoder"),
-                });
+        let mut encoder = session
+            .device
+            .create_command_encoder(&wgpu::CommandEncoderDescriptor {
+                label: Some("shimmer_encoder"),
+            });
         session.pipeline.render(&mut encoder, &view);
         session.queue.submit(Some(encoder.finish()));
         frame.present();

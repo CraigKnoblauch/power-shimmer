@@ -32,7 +32,7 @@ raw-window-handle = "0.6"
 bytemuck = { version = "1", features = ["derive"] }
 pollster = "0.4"
 x11rb = { version = "0.13", default-features = false, features = ["shape"] }
-tray-icon = "0.19"
+tray-icon = { version = "0.19", default-features = false }
 
 [workspace.lints.rust]
 unsafe_code = "forbid"

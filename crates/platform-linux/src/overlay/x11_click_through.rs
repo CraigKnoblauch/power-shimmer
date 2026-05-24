@@ -4,8 +4,8 @@ use raw_window_handle::{HasWindowHandle, RawWindowHandle};
 use tracing::warn;
 use winit::window::Window;
 use x11rb::connection::Connection;
-use x11rb::protocol::shape::{ConnectionExt as ShapeConnectionExt, SO, SK};
-use x11rb::protocol::xproto::{self, ConnectionExt as XprotoConnectionExt, ClipOrdering};
+use x11rb::protocol::shape::{ConnectionExt as ShapeConnectionExt, SK, SO};
+use x11rb::protocol::xproto::{self, ClipOrdering, ConnectionExt as XprotoConnectionExt};
 use x11rb::rust_connection::RustConnection;
 
 /// Applies click-through input shape and skip-taskbar hints (best effort).

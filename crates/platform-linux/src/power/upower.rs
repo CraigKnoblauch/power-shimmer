@@ -169,8 +169,7 @@ async fn run_upower_session(state: &SharedState) -> Result<(), String> {
 }
 
 async fn read_upower_online(properties: &PropertiesProxy<'_>) -> Result<Option<bool>, String> {
-    let interface =
-        InterfaceName::try_from(UPOWER_INTERFACE).map_err(|error| error.to_string())?;
+    let interface = InterfaceName::try_from(UPOWER_INTERFACE).map_err(|error| error.to_string())?;
 
     match properties.get(interface, "OnLine").await {
         Ok(value) => {

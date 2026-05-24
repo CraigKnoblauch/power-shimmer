@@ -202,10 +202,7 @@ mod tests {
 
     #[test]
     fn read_ac_online_detects_plugged_mains_supply() {
-        let root = std::env::temp_dir().join(format!(
-            "power-shimmer-sysfs-{}",
-            std::process::id()
-        ));
+        let root = std::env::temp_dir().join(format!("power-shimmer-sysfs-{}", std::process::id()));
         let _ = fs::remove_dir_all(&root);
 
         write_supply(&root, "AC0", "Mains", "1");
@@ -234,10 +231,8 @@ mod tests {
 
     #[test]
     fn backend_notifies_on_sysfs_change() {
-        let root = std::env::temp_dir().join(format!(
-            "power-shimmer-sysfs-notify-{}",
-            std::process::id()
-        ));
+        let root =
+            std::env::temp_dir().join(format!("power-shimmer-sysfs-notify-{}", std::process::id()));
         let _ = fs::remove_dir_all(&root);
 
         write_supply(&root, "AC0", "Mains", "0");
@@ -258,10 +253,8 @@ mod tests {
 
     #[test]
     fn backend_poll_detects_change_within_interval() {
-        let root = std::env::temp_dir().join(format!(
-            "power-shimmer-sysfs-poll-{}",
-            std::process::id()
-        ));
+        let root =
+            std::env::temp_dir().join(format!("power-shimmer-sysfs-poll-{}", std::process::id()));
         let _ = fs::remove_dir_all(&root);
 
         write_supply(&root, "AC0", "Mains", "0");

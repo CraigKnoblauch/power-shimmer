@@ -12,19 +12,33 @@ repository.workspace = true
 name = "power-shimmer"
 path = "src/main.rs"
 
+[lib]
+name = "power_shimmer_app"
+path = "src/lib.rs"
+
 [dependencies]
 power-shimmer-core = { path = "../core" }
 power-shimmer-platform-linux = { path = "../platform-linux", optional = true }
 power-shimmer-platform-windows = { path = "../platform-windows", optional = true }
 power-shimmer-platform-macos = { path = "../platform-macos", optional = true }
-# CLI/tray/runtime deps from [workspace.dependencies] are wired in during app
-# implementation (requires current Rust stable via rustup).
+clap = { workspace = true }
+serde = { workspace = true }
+toml = { workspace = true }
+thiserror = { workspace = true }
+tokio = { workspace = true, features = ["macros", "rt-multi-thread", "sync", "time", "signal"] }
+tracing = { workspace = true }
+tracing-subscriber = { workspace = true }
+tray-icon = { workspace = true, optional = true }
 
 [features]
-default = ["linux"]
+default = ["linux", "tray"]
 linux = ["dep:power-shimmer-platform-linux"]
+tray = ["dep:tray-icon"]
 windows = ["dep:power-shimmer-platform-windows"]
 macos = ["dep:power-shimmer-platform-macos"]
+
+[dev-dependencies]
+tempfile = "3"
 
 [lints]
 workspace = true
