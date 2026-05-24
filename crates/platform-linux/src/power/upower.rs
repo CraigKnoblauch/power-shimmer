@@ -18,6 +18,11 @@ use super::backend::{source_from_online_option, PowerSourceBackend};
 const UPOWER_SERVICE: &str = "org.freedesktop.UPower";
 const UPOWER_PATH: &str = "/org/freedesktop/UPower";
 const UPOWER_INTERFACE: &str = "org.freedesktop.UPower";
+const DISPLAY_DEVICE_PATH: &str = "/org/freedesktop/UPower/devices/DisplayDevice";
+const UPOWER_DEVICE_INTERFACE: &str = "org.freedesktop.UPower.Device";
+
+/// UPower device type for AC/mains adapters (`Type` property).
+const LINE_POWER_DEVICE_TYPE: u32 = 1;
 
 const INITIAL_RETRY_DELAY: Duration = Duration::from_secs(1);
 const MAX_RETRY_DELAY: Duration = Duration::from_secs(5);
@@ -139,36 +144,137 @@ async fn run_upower_session(state: &SharedState) -> Result<(), String> {
         .await
         .map_err(|error| error.to_string())?;
 
-    let properties = PropertiesProxy::builder(&connection)
-        .destination(UPOWER_SERVICE)
-        .map_err(|error| error.to_string())?
-        .path(UPOWER_PATH)
-        .map_err(|error| error.to_string())?
-        .build()
-        .await
-        .map_err(|error| error.to_string())?;
-
-    let initial = read_upower_online(&properties).await?;
+    let initial = read_upower_ac_online(&connection, UPOWER_SERVICE).await?;
     update_online(state, initial);
 
-    let mut changes = properties
-        .receive_properties_changed()
-        .await
-        .map_err(|error| error.to_string())?;
+    let (hint_tx, mut hint_rx) = tokio::sync::mpsc::unbounded_channel();
+
+    subscribe_property_changes(&connection, UPOWER_SERVICE, UPOWER_PATH, hint_tx.clone()).await?;
+    subscribe_property_changes(&connection, UPOWER_SERVICE, DISPLAY_DEVICE_PATH, hint_tx.clone())
+        .await?;
+
+    for path in line_power_device_paths(&connection, UPOWER_SERVICE).await? {
+        subscribe_property_changes(&connection, UPOWER_SERVICE, &path, hint_tx.clone()).await?;
+    }
+
+    drop(hint_tx);
 
     while !state.shutdown.load(Ordering::SeqCst) {
-        if changes.next().await.is_none() {
+        if hint_rx.recv().await.is_none() {
             return Err("UPower properties stream ended".to_string());
         }
 
-        let online = read_upower_online(&properties).await?;
+        let online = read_upower_ac_online(&connection, UPOWER_SERVICE).await?;
         update_online(state, online);
     }
 
     Ok(())
 }
 
-async fn read_upower_online(properties: &PropertiesProxy<'_>) -> Result<Option<bool>, String> {
+async fn subscribe_property_changes(
+    connection: &Connection,
+    destination: &str,
+    path: &str,
+    hint_tx: tokio::sync::mpsc::UnboundedSender<()>,
+) -> Result<(), String> {
+    let properties = properties_proxy(connection, destination, path).await?;
+    let mut changes = properties
+        .receive_properties_changed()
+        .await
+        .map_err(|error| error.to_string())?;
+
+    tokio::spawn(async move {
+        while changes.next().await.is_some() {
+            let _ = hint_tx.send(());
+        }
+    });
+
+    Ok(())
+}
+
+async fn read_upower_ac_online(
+    connection: &Connection,
+    destination: &str,
+) -> Result<Option<bool>, String> {
+    if let Some(online) = read_display_device_online(connection, destination).await? {
+        return Ok(Some(online));
+    }
+
+    if let Some(online) = read_line_power_online(connection, destination).await? {
+        return Ok(Some(online));
+    }
+
+    read_legacy_root_online(connection, destination).await
+}
+
+async fn read_display_device_online(
+    connection: &Connection,
+    destination: &str,
+) -> Result<Option<bool>, String> {
+    let properties =
+        match properties_proxy(connection, destination, DISPLAY_DEVICE_PATH).await {
+            Ok(proxy) => proxy,
+            Err(_) => return Ok(None),
+        };
+    let interface =
+        InterfaceName::try_from(UPOWER_DEVICE_INTERFACE).map_err(|error| error.to_string())?;
+
+    match properties.get(interface, "OnBattery").await {
+        Ok(value) => {
+            let on_battery = bool::try_from(value).map_err(|error| error.to_string())?;
+            Ok(Some(!on_battery))
+        }
+        Err(_) => Ok(None),
+    }
+}
+
+async fn read_line_power_online(
+    connection: &Connection,
+    destination: &str,
+) -> Result<Option<bool>, String> {
+    let interface =
+        InterfaceName::try_from(UPOWER_DEVICE_INTERFACE).map_err(|error| error.to_string())?;
+    let mut found = None;
+
+    for path in enumerate_device_paths(connection, destination).await? {
+        if path == DISPLAY_DEVICE_PATH {
+            continue;
+        }
+
+        let properties = match properties_proxy(connection, destination, &path).await {
+            Ok(proxy) => proxy,
+            Err(_) => continue,
+        };
+
+        let device_type = match properties.get(interface.clone(), "Type").await {
+            Ok(value) => u32::try_from(value).map_err(|error| error.to_string())?,
+            Err(_) => continue,
+        };
+
+        if device_type != LINE_POWER_DEVICE_TYPE {
+            continue;
+        }
+
+        match properties.get(interface.clone(), "Online").await {
+            Ok(value) => {
+                let online = bool::try_from(value).map_err(|error| error.to_string())?;
+                found = Some(found.unwrap_or(false) || online);
+            }
+            Err(_) => continue,
+        }
+    }
+
+    Ok(found)
+}
+
+async fn read_legacy_root_online(
+    connection: &Connection,
+    destination: &str,
+) -> Result<Option<bool>, String> {
+    let properties = match properties_proxy(connection, destination, UPOWER_PATH).await {
+        Ok(proxy) => proxy,
+        Err(_) => return Ok(None),
+    };
     let interface = InterfaceName::try_from(UPOWER_INTERFACE).map_err(|error| error.to_string())?;
 
     match properties.get(interface, "OnLine").await {
@@ -181,6 +287,80 @@ async fn read_upower_online(properties: &PropertiesProxy<'_>) -> Result<Option<b
             Ok(None)
         }
     }
+}
+
+async fn enumerate_device_paths(
+    connection: &Connection,
+    destination: &str,
+) -> Result<Vec<String>, String> {
+    use zbus::zvariant::OwnedObjectPath;
+
+    let reply = match connection
+        .call_method(
+            Some(destination),
+            UPOWER_PATH,
+            Some(UPOWER_INTERFACE),
+            "EnumerateDevices",
+            &(),
+        )
+        .await
+    {
+        Ok(reply) => reply,
+        Err(_) => return Ok(Vec::new()),
+    };
+
+    let paths: Vec<OwnedObjectPath> = reply
+        .body()
+        .deserialize()
+        .map_err(|error| error.to_string())?;
+
+    Ok(paths.into_iter().map(|path| path.to_string()).collect())
+}
+
+async fn line_power_device_paths(
+    connection: &Connection,
+    destination: &str,
+) -> Result<Vec<String>, String> {
+    let interface =
+        InterfaceName::try_from(UPOWER_DEVICE_INTERFACE).map_err(|error| error.to_string())?;
+    let mut paths = Vec::new();
+
+    for path in enumerate_device_paths(connection, destination).await? {
+        if path == DISPLAY_DEVICE_PATH {
+            continue;
+        }
+
+        let properties = match properties_proxy(connection, destination, &path).await {
+            Ok(proxy) => proxy,
+            Err(_) => continue,
+        };
+
+        let device_type = match properties.get(interface.clone(), "Type").await {
+            Ok(value) => u32::try_from(value).map_err(|error| error.to_string())?,
+            Err(_) => continue,
+        };
+
+        if device_type == LINE_POWER_DEVICE_TYPE {
+            paths.push(path);
+        }
+    }
+
+    Ok(paths)
+}
+
+async fn properties_proxy<'c>(
+    connection: &'c Connection,
+    destination: &'c str,
+    path: &'c str,
+) -> Result<PropertiesProxy<'c>, String> {
+    PropertiesProxy::builder(connection)
+        .destination(destination)
+        .map_err(|error| error.to_string())?
+        .path(path)
+        .map_err(|error| error.to_string())?
+        .build()
+        .await
+        .map_err(|error| error.to_string())
 }
 
 fn update_online(state: &SharedState, online: Option<bool>) {
@@ -207,13 +387,22 @@ mod tests {
 
     use super::*;
 
-    const DISPLAY_DEVICE_PATH: &str = "/org/freedesktop/UPower/devices/DisplayDevice";
-    const UPOWER_DEVICE_INTERFACE: &str = "org.freedesktop.UPower.Device";
-
     struct MockUpowerRoot;
 
     #[interface(name = "org.freedesktop.UPower")]
     impl MockUpowerRoot {}
+
+    struct MockUpowerRootLegacy {
+        on_line: bool,
+    }
+
+    #[interface(name = "org.freedesktop.UPower")]
+    impl MockUpowerRootLegacy {
+        #[zbus(property)]
+        fn on_line(&self) -> bool {
+            self.on_line
+        }
+    }
 
     struct MockDisplayDevice {
         on_battery: bool,
@@ -225,6 +414,27 @@ mod tests {
         fn on_battery(&self) -> bool {
             self.on_battery
         }
+    }
+
+    async fn mock_upower_bus(server: MockUpowerRootLegacy) -> (Connection, OwnedUniqueName) {
+        let server = Builder::session()
+            .expect("session bus")
+            .serve_at(UPOWER_PATH, server)
+            .expect("serve root UPower object")
+            .build()
+            .await
+            .expect("mock UPower server connection");
+
+        let destination = server
+            .unique_name()
+            .expect("mock UPower unique bus name")
+            .clone();
+        let client = Connection::session()
+            .await
+            .expect("session bus client connection");
+
+        std::mem::forget(server);
+        (client, destination)
     }
 
     async fn mock_modern_upower_bus() -> (Connection, OwnedUniqueName) {
@@ -264,9 +474,10 @@ mod tests {
     #[tokio::test]
     async fn modern_upower_without_root_online_reads_ac_from_display_device() {
         let (connection, destination) = mock_modern_upower_bus().await;
+        let bus_name = destination.as_str();
 
         let root_properties = PropertiesProxy::builder(&connection)
-            .destination(destination.clone())
+            .destination(bus_name)
             .expect("UPower destination")
             .path(UPOWER_PATH)
             .expect("UPower path")
@@ -275,7 +486,7 @@ mod tests {
             .expect("root PropertiesProxy");
 
         let display_properties = PropertiesProxy::builder(&connection)
-            .destination(destination)
+            .destination(bus_name)
             .expect("UPower destination")
             .path(DISPLAY_DEVICE_PATH)
             .expect("DisplayDevice path")
@@ -307,15 +518,27 @@ mod tests {
             "mock DisplayDevice must report on AC power (OnBattery=false)"
         );
 
-        let online = read_upower_online(&root_properties)
+        let online = read_upower_ac_online(&connection, bus_name)
             .await
             .expect("read should not hard-fail when root OnLine is absent");
 
         assert_eq!(
             online,
             Some(true),
-            "UPower is reachable and DisplayDevice reports AC; read_upower_online must \
+            "UPower is reachable and DisplayDevice reports AC; read_upower_ac_online must \
              return Some(true) instead of None"
         );
+    }
+
+    #[tokio::test]
+    async fn legacy_upower_root_online_is_used_when_present() {
+        let (connection, destination) =
+            mock_upower_bus(MockUpowerRootLegacy { on_line: false }).await;
+
+        let online = read_upower_ac_online(&connection, destination.as_str())
+            .await
+            .expect("legacy root OnLine read");
+
+        assert_eq!(online, Some(false));
     }
 }
