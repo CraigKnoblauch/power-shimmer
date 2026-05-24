@@ -5,3 +5,9 @@
 pub mod domain;
 pub mod ports;
 pub mod services;
+
+pub use domain::{
+    MonitorTarget, OrchestratorError, OverlayError, PowerEvent, PowerListenerError, PowerSource,
+    ShimmerConfig, ShimmerRequest, ShimmerTrigger,
+};
+pub use ports::{PowerEventListener, PowerEventStream};

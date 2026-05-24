@@ -2,3 +2,8 @@
 
 pub mod errors;
 pub mod events;
+
+pub use errors::{OrchestratorError, OverlayError, PowerListenerError};
+pub use events::{
+    MonitorTarget, PowerEvent, PowerSource, ShimmerConfig, ShimmerRequest, ShimmerTrigger,
+};
