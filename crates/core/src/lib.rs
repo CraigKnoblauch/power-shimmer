@@ -6,8 +6,13 @@ pub mod domain;
 pub mod ports;
 pub mod services;
 
+/// Test doubles for port traits. Not used in production wiring.
+#[doc(hidden)]
+pub mod testing;
+
 pub use domain::{
-    MonitorTarget, OrchestratorError, OverlayError, PowerEvent, PowerListenerError, PowerSource,
-    ShimmerConfig, ShimmerRequest, ShimmerTrigger,
+    MonitorTarget, OrchestratorConfig, OrchestratorError, OverlapPolicy, OverlayError, PowerEvent,
+    PowerListenerError, PowerSource, ShimmerConfig, ShimmerRequest, ShimmerTrigger,
 };
-pub use ports::{PowerEventListener, PowerEventStream};
+pub use ports::{OverlayRenderer, PowerEventListener, PowerEventStream};
+pub use testing::{MockOverlayRenderer, MockPowerEventListener};

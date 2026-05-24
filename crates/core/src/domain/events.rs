@@ -15,14 +15,9 @@ pub enum PowerSource {
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum PowerEvent {
     /// Emitted once when the listener starts, before any transition events.
-    InitialState {
-        source: PowerSource,
-    },
+    InitialState { source: PowerSource },
     /// Emitted when the active power source changes.
-    Transition {
-        from: PowerSource,
-        to: PowerSource,
-    },
+    Transition { from: PowerSource, to: PowerSource },
 }
 
 impl PowerEvent {

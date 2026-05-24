@@ -5,9 +5,7 @@ use std::sync::Arc;
 use std::thread;
 use std::time::Duration;
 
-use power_shimmer_core::{
-    PowerEvent, PowerEventListener, PowerEventStream, PowerListenerError,
-};
+use power_shimmer_core::{PowerEvent, PowerEventListener, PowerEventStream, PowerListenerError};
 
 use super::backend::{source_from_online, PowerSourceBackend};
 
@@ -52,7 +50,10 @@ where
 
         let worker = thread::spawn(move || {
             let initial = backend.initial_source();
-            if tx.send(Ok(PowerEvent::InitialState { source: initial })).is_err() {
+            if tx
+                .send(Ok(PowerEvent::InitialState { source: initial }))
+                .is_err()
+            {
                 return;
             }
 
@@ -118,9 +119,8 @@ mod tests {
 
     #[test]
     fn battery_to_ac_transition_invokes_event_handler() {
-        let listener =
-            LinuxPowerListener::new(MockPowerBackend::on_battery_then_plug_ac())
-                .with_debounce(Duration::ZERO);
+        let listener = LinuxPowerListener::new(MockPowerBackend::on_battery_then_plug_ac())
+            .with_debounce(Duration::ZERO);
 
         let stream = listener.subscribe().expect("subscribe should succeed");
 

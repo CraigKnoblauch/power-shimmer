@@ -3,4 +3,5 @@
 pub mod overlay;
 pub mod power;
 
+pub use overlay::OverlayRenderer;
 pub use power::{PowerEventListener, PowerEventStream};

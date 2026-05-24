@@ -25,21 +25,23 @@ A laptop on **Linux (X11 + UPower)** can run `power-shimmer` as a background uti
 | Area | Status | Notes |
 |------|--------|--------|
 | Workspace & crates | Done | `core`, `platform-linux`, `app`, stubs for win/macOS |
-| Domain types (partial) | Done | `PowerSource`, `PowerEvent`, `ShimmerConfig`, errors in `core::domain` |
+| Domain types | Done | `PowerSource`, `PowerEvent`, `ShimmerConfig`, `OrchestratorConfig`, `OverlapPolicy`, errors in `core::domain` |
 | `PowerEventListener` port | Done | `subscribe()` → `PowerEventStream` (`recv` / `recv_timeout`) |
-| `OverlayRenderer` port | Not started | `crates/core/src/ports/overlay.rs` is a stub |
+| `OverlayRenderer` port | Done | Trait + SPEC docs in `crates/core/src/ports/overlay.rs`; no platform deps |
 | `ShimmerOrchestrator` | Not started | `crates/core/src/services/shimmer_orchestrator.rs` is a stub |
-| `OrchestratorConfig` / overlap policy | Not started | Belongs in `core::domain` per SPEC |
+| `OrchestratorConfig` / overlap policy | Done | `domain/config.rs`; defaults: `Skip`, `auto_enabled: true`, `dry_run: false` |
 | Generic Linux power listener | **Partial** | `LinuxPowerListener` + `PowerSourceBackend`; emits `InitialState` + `Transition` from injectable backend |
 | UPower / sysfs backends | Not started | `upower.rs`, `sysfs_fallback.rs` stubs |
 | 400 ms debounce coalescing | Not started | Listener sleeps on debounce but does not coalesce rapid flicker (SPEC) |
-| `MockPowerEventListener` (core) | Not started | SPEC test double for orchestrator tests |
+| `MockPowerEventListener` (core) | Done | `core::testing::mock_power.rs`; injects `Vec<PowerEvent>` |
+| `MockOverlayRenderer` (core) | Done | `core::testing::mock_overlay.rs`; `play_calls`, delay, `cancel()` → `Cancelled` |
 | Overlay (X11 + wgpu) | Not started | `wgpu_shimmer.rs`, `x11_click_through.rs` stubs |
 | App (CLI, tray, wiring, config) | Not started | `main` prints placeholder message |
-| Orchestrator unit tests (SPEC table) | Not started | `orchestrator_test.rs` is scaffold-only |
+| Orchestrator unit tests (SPEC table) | Not started | `orchestrator_test.rs` has mock/config smoke tests only; full SPEC table in Phase 1.6 |
+| Mock overlay unit tests (SPEC) | Done | `is_playing`, `Cancelled`, completion covered in `mock_overlay.rs` unit tests |
 | Linux power smoke test | Ignored | `linux_power_smoke.rs` placeholder |
 
-**Reference implementation today:** one passing unit test — mock backend simulates Battery → AC; `LinuxPowerListener` normalizes it to `PowerEvent::Transition { Battery, Ac }`.
+**Reference implementation today:** `cargo test -p power-shimmer-core` — 9 tests green (domain defaults, mock port unit tests, integration smoke). Linux listener test: mock backend simulates Battery → AC; `LinuxPowerListener` normalizes it to `PowerEvent::Transition { Battery, Ac }`.
 
 ---
 
@@ -52,10 +54,11 @@ flowchart TD
     subgraph done [Done]
         A[Domain + power port]
         B[LinuxPowerListener + mock backend test]
-    end
-    subgraph p1 [Phase 1 — Core brain]
         C[OrchestratorConfig domain]
         D[Mock ports]
+        I[OverlayRenderer port]
+    end
+    subgraph p1 [Phase 1 — Core brain]
         E[ShimmerOrchestrator + SPEC unit tests]
     end
     subgraph p2 [Phase 2 — Real power]
@@ -64,7 +67,6 @@ flowchart TD
         H[Debounce + adapter tests]
     end
     subgraph p3 [Phase 3 — Overlay]
-        I[OverlayRenderer port]
         J[X11 window + click-through]
         K[wgpu shader + play/cancel]
     end
@@ -90,15 +92,15 @@ Phases 2 and 3 can proceed in parallel once Phase 1 lands; Phase 4 requires both
 
 **Objective:** Battery → AC policy and manual triggers work entirely in `core` with no OS or GPU code.
 
-| # | Task | SPEC / files | Acceptance |
-|---|------|----------------|------------|
-| 1.1 | Add `OrchestratorConfig`, `OverlapPolicy`, defaults | Module 1 | Compiles; defaults match SPEC (`Skip`, `auto_enabled: true`, etc.) |
-| 1.2 | Implement `OverlayRenderer` trait in `ports/overlay.rs` | Module 3 | Trait + docs; no platform deps |
-| 1.3 | `MockPowerEventListener` | Module 2 test double | Injects `Vec<PowerEvent>` for tests |
-| 1.4 | `MockOverlayRenderer` | Module 3 test double | Records `play_calls`; supports `delay` + `cancel()` → `Cancelled` |
-| 1.5 | Implement `ShimmerOrchestrator` | Module 4 | `new`, `run`, `trigger_manual`, `update_config`, `set_auto_enabled`, `shutdown` |
-| 1.6 | Orchestrator unit tests | SPEC “Unit Test Requirements” | All rows in orchestrator table pass |
-| 1.7 | Optional: `should_auto_play` as pure fn + tests | Module 4 predicate | Documents policy without integration |
+| # | Task | SPEC / files | Acceptance | Status |
+|---|------|----------------|------------|--------|
+| 1.1 | Add `OrchestratorConfig`, `OverlapPolicy`, defaults | `domain/config.rs` | Compiles; defaults match SPEC (`Skip`, `auto_enabled: true`, etc.) | **Done** |
+| 1.2 | Implement `OverlayRenderer` trait in `ports/overlay.rs` | Module 3 | Trait + docs; no platform deps | **Done** |
+| 1.3 | `MockPowerEventListener` | `testing/mock_power.rs` | Injects `Vec<PowerEvent>` for tests | **Done** |
+| 1.4 | `MockOverlayRenderer` | `testing/mock_overlay.rs` | Records `play_calls`; supports `delay` + `cancel()` → `Cancelled` | **Done** |
+| 1.5 | Implement `ShimmerOrchestrator` | Module 4 | `new`, `run`, `trigger_manual`, `update_config`, `set_auto_enabled`, `shutdown` | Not started |
+| 1.6 | Orchestrator unit tests | SPEC “Unit Test Requirements” | All rows in orchestrator table pass | Not started |
+| 1.7 | Optional: `should_auto_play` as pure fn + tests | Module 4 predicate | Documents policy without integration | Not started |
 
 **Exit criteria:** `cargo test -p power-shimmer-core` covers orchestrator behavior; zero `platform-linux` / `winit` / `zbus` in `core`.
 
@@ -135,7 +137,7 @@ Phases 2 and 3 can proceed in parallel once Phase 1 lands; Phase 4 requires both
 | 3.4 | `WgpuShimmerRenderer` implements `OverlayRenderer` | `overlay/wgpu_shimmer.rs` | `play` / `is_playing` / `cancel` |
 | 3.5 | WGSL rainbow + shimmer band | `assets/shaders/` | Honors `duration_ms`, `opacity`, `speed` ± one frame |
 | 3.6 | Teardown ≤ 500 ms | Module 3 | Resources released after complete or cancel |
-| 3.7 | Mock overlay unit tests in `core` or `platform-linux` | SPEC overlay tests | `is_playing`, `Cancelled`, completion |
+| 3.7 | Mock overlay unit tests in `core` or `platform-linux` | SPEC overlay tests | `is_playing`, `Cancelled`, completion | **Done** (core `mock_overlay.rs`) |
 | 3.8 | Manual test: `power-shimmer --trigger` | App (Phase 4) | Visible shimmer without power event |
 
 **Exit criteria:** Orchestrator + real overlay completes end-to-end on X11; `wayland_layer_shell.rs` remains stubbed.
@@ -188,19 +190,20 @@ Phases 2 and 3 can proceed in parallel once Phase 1 lands; Phase 4 requires both
 
 | SPEC module | Crate | Path | Roadmap phase |
 |-------------|-------|------|----------------|
-| Domain types | `core` | `domain/` | 1 (finish config types) |
+| Domain types | `core` | `domain/` | Done |
 | Power Listener port | `core` | `ports/power.rs` | Done |
 | Power Listener adapter | `platform-linux` | `power/listener.rs`, `upower.rs`, `sysfs_fallback.rs` | 2 |
-| Overlay Renderer port | `core` | `ports/overlay.rs` | 1 |
+| Overlay Renderer port | `core` | `ports/overlay.rs` | Done |
 | Overlay Renderer adapter | `platform-linux` | `overlay/wgpu_shimmer.rs`, `x11_click_through.rs` | 3 |
-| Shimmer Orchestrator | `core` | `services/shimmer_orchestrator.rs` | 1 |
+| Shimmer Orchestrator | `core` | `services/shimmer_orchestrator.rs` | 1 (1.5–1.6 remaining) |
+| Test doubles | `core` | `testing/mock_power.rs`, `testing/mock_overlay.rs` | Done |
 | CLI / tray / wiring | `app` | `main.rs`, `wiring.rs`, `tray.rs`, `config.rs` | 4 |
 
 ---
 
 ## Suggested next step
 
-**Phase 1.1–1.6:** Add `OrchestratorConfig`, mock ports, and `ShimmerOrchestrator` with the SPEC orchestrator unit test table. That unlocks parallel work on UPower (Phase 2) and wgpu overlay (Phase 3) without coupling them.
+**Phase 1.5–1.6:** Implement `ShimmerOrchestrator` and the full SPEC orchestrator unit test table in `orchestrator_test.rs`. Mock boundaries (tasks 1.1–1.4) are in place — that unlocks parallel work on UPower (Phase 2) and wgpu overlay (Phase 3) without coupling them.
 
 ```bash
 cargo test -p power-shimmer-core
