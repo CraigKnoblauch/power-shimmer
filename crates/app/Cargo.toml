@@ -40,5 +40,8 @@ macos = ["dep:power-shimmer-platform-macos"]
 [dev-dependencies]
 tempfile = "3"
 
+[target.'cfg(target_os = "linux")'.dev-dependencies]
+gtk = "0.18"
+
 [lints]
 workspace = true

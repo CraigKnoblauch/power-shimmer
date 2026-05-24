@@ -15,6 +15,29 @@ const ID_PLAY: &str = "play";
 const ID_AUTO: &str = "auto";
 const ID_QUIT: &str = "quit";
 
+/// Initializes GTK on the current thread so tray menus can be created.
+///
+/// Must be called on the tray thread before [`prepare_tray_menu`] or [`run_tray`].
+///
+/// # Errors
+///
+/// Returns [`AppError::Tray`] when GTK initialization fails.
+pub fn init_tray_gtk() -> Result<(), AppError> {
+    // Stub: fix will call gtk::init() here (notes/issues/tray-gtk-init-panic.md).
+    Ok(())
+}
+
+/// Builds the tray context menu after GTK has been initialized.
+///
+/// # Errors
+///
+/// Returns [`AppError::Tray`] when menu items cannot be appended.
+pub fn prepare_tray_menu(auto_enabled: bool) -> Result<(), AppError> {
+    let menu = build_menu(auto_enabled);
+    drop(menu);
+    Ok(())
+}
+
 /// Runs the tray event loop on the current thread until Quit.
 ///
 /// # Errors
