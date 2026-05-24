@@ -10,9 +10,10 @@ repository.workspace = true
 
 [dependencies]
 power-shimmer-core = { path = "../core" }
-# Approved adapter deps (see root Cargo.toml [workspace.dependencies]) are added
-# when power/overlay implementations land. They require a current Rust stable
-# toolchain (rustup); the system apt Rust 1.75 package is too old for wgpu/winit.
+futures-lite = "2"
+tokio = { workspace = true }
+tracing = { workspace = true }
+zbus = { workspace = true }
 
 [features]
 default = []

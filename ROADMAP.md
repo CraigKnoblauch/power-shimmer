@@ -31,18 +31,18 @@ A laptop on **Linux (X11 + UPower)** can run `power-shimmer` as a background uti
 | `ShimmerOrchestrator` | Done | `services/shimmer_orchestrator.rs`; `run`, `trigger_manual`, `shutdown`, overlap/dry-run policy |
 | `should_auto_play` policy | Done | `services/policy.rs` pure predicate + unit tests |
 | `OrchestratorConfig` / overlap policy | Done | `domain/config.rs`; defaults: `Skip`, `auto_enabled: true`, `dry_run: false` |
-| Generic Linux power listener | **Partial** | `LinuxPowerListener` + `PowerSourceBackend`; emits `InitialState` + `Transition` from injectable backend |
-| UPower / sysfs backends | Not started | `upower.rs`, `sysfs_fallback.rs` stubs |
-| 400 ms debounce coalescing | Not started | Listener sleeps on debounce but does not coalesce rapid flicker (SPEC) |
+| Generic Linux power listener | Done | `LinuxPowerListener` + `PowerSourceBackend`; trailing-edge 400 ms debounce; emits `InitialState` + `Transition` |
+| UPower / sysfs backends | Done | `UpowerBackend` (D-Bus `OnLine` + `PropertiesChanged`); `SysfsFallbackBackend` (sysfs poll); `LinuxPowerBackend::select()` |
+| 400 ms debounce coalescing | Done | Trailing-edge coalesce in `listener.rs`; unit test `debounce_coalesces_rapid_flicker_into_single_transition` |
 | `MockPowerEventListener` (core) | Done | `core::testing::mock_power.rs`; injects `Vec<PowerEvent>` |
 | `MockOverlayRenderer` (core) | Done | `core::testing::mock_overlay.rs`; `play_calls`, delay, `cancel()` → `Cancelled` |
 | Overlay (X11 + wgpu) | Not started | `wgpu_shimmer.rs`, `x11_click_through.rs` stubs |
 | App (CLI, tray, wiring, config) | Not started | `main` prints placeholder message |
 | Orchestrator unit tests (SPEC table) | Done | All 8 SPEC rows + shutdown in `orchestrator_test.rs` |
 | Mock overlay unit tests (SPEC) | Done | `is_playing`, `Cancelled`, completion covered in `mock_overlay.rs` unit tests |
-| Linux power smoke test | Ignored | `linux_power_smoke.rs` placeholder |
+| Linux power smoke test | Wired, ignored | `linux_power_smoke.rs` uses `LinuxPowerBackend::select()`; run with `--ignored` on hardware |
 
-**Reference implementation today:** `cargo test -p power-shimmer-core` — **20 tests green** (policy, mocks, full orchestrator SPEC table). Phase 1 complete. Linux listener: mock backend simulates Battery → AC; `LinuxPowerListener` normalizes it to `PowerEvent::Transition { Battery, Ac }`.
+**Reference implementation today:** `cargo test -p power-shimmer-core` — **20 tests green** (policy, mocks, full orchestrator SPEC table). `cargo test -p power-shimmer-platform-linux` — **8 tests green** (listener debounce, sysfs hermetic tests, UPower startup). Phase 1 and **Phase 2 complete**. Production power path: `LinuxPowerBackend::select()` → `LinuxPowerListener` → normalized `PowerEvent` stream.
 
 ---
 
@@ -59,8 +59,6 @@ flowchart TD
         D[Mock ports]
         I[OverlayRenderer port]
         E[ShimmerOrchestrator + SPEC unit tests]
-    end
-    subgraph p2 [Phase 2 — Real power]
         F[UPower PowerSourceBackend]
         G[sysfs fallback]
         H[Debounce + adapter tests]
@@ -83,7 +81,7 @@ flowchart TD
     L --> M --> N --> O
 ```
 
-Phases 2 and 3 can proceed in parallel once Phase 1 lands; Phase 4 requires both.
+Phases 2 and 3 can proceed in parallel once Phase 1 lands; Phase 4 requires both. **Phase 2 is complete** — proceed with Phase 3 (overlay) and Phase 4 (app wiring).
 
 ---
 
@@ -109,18 +107,18 @@ Phases 2 and 3 can proceed in parallel once Phase 1 lands; Phase 4 requires both
 
 **Objective:** Replace the test-only `MockPowerBackend` with production backends while keeping `LinuxPowerListener` unchanged.
 
-| # | Task | SPEC / files | Acceptance |
-|---|------|----------------|------------|
-| 2.1 | `UpowerBackend` implements `PowerSourceBackend` | `power/upower.rs`, `zbus` | Reads `Online`; maps to `PowerSource` |
-| 2.2 | Wire `LinuxPowerListener::new(UpowerBackend::…)` | App wiring (later) or unit test with D-Bus test double | `InitialState` reflects live state in integration |
-| 2.3 | `SysfsFallbackBackend` | `power/sysfs_fallback.rs` | Same event protocol; selected when UPower unavailable |
-| 2.4 | Backend selection | Adapter detail | UPower preferred; sysfs when D-Bus session missing |
-| 2.5 | Debounce coalescing (400 ms) | Module 2 | Two rapid `online` toggles within 400 ms → **one** `Transition` |
-| 2.6 | `InitialState { Unknown }` + background retry | Module 2 | Does not block orchestrator when UPower down at startup |
-| 2.7 | Unit test: debounce coalescing | SPEC power listener tests | Mock backend pushes flicker; assert single transition |
-| 2.8 | Enable `linux_power_smoke` (ignored → run on CI/hardware) | `tests/linux_power_smoke.rs` | Manual/CI: plug AC → receive `Transition(Battery, Ac)` |
+| # | Task | SPEC / files | Acceptance | Status |
+|---|------|----------------|------------|--------|
+| 2.1 | `UpowerBackend` implements `PowerSourceBackend` | `power/upower.rs`, `zbus` | Reads `OnLine`; maps to `PowerSource` | **Done** |
+| 2.2 | Wire `LinuxPowerListener::new(UpowerBackend::…)` | App wiring (Phase 4) or integration test | `InitialState` reflects live state in integration | **Partial** — smoke test wired; app composition root in Phase 4 |
+| 2.3 | `SysfsFallbackBackend` | `power/sysfs_fallback.rs` | Same event protocol; selected when UPower unavailable | **Done** |
+| 2.4 | Backend selection | `power/mod.rs` (`LinuxPowerBackend::select`) | UPower preferred; sysfs when D-Bus unavailable | **Done** |
+| 2.5 | Debounce coalescing (400 ms) | `power/listener.rs` | Two rapid `online` toggles within 400 ms → **one** `Transition` | **Done** |
+| 2.6 | `InitialState { Unknown }` + background retry | `power/upower.rs` | Does not block orchestrator when UPower down at startup | **Done** |
+| 2.7 | Unit test: debounce coalescing | `power/listener.rs` tests | Mock backend pushes flicker; assert single transition | **Done** |
+| 2.8 | Enable `linux_power_smoke` (ignored → run on CI/hardware) | `tests/linux_power_smoke.rs` | Manual/CI: plug AC → receive `Transition(Battery, Ac)` | **Partial** — test wired; still `#[ignore]` until CI/hardware run |
 
-**Exit criteria:** Daemon can subscribe to real power on a Linux laptop; listener still does **not** decide shimmer policy.
+**Exit criteria:** Daemon can subscribe to real power on a Linux laptop; listener still does **not** decide shimmer policy. **Met** (pending Phase 4 daemon wiring and manual smoke run).
 
 ---
 
@@ -191,7 +189,7 @@ Phases 2 and 3 can proceed in parallel once Phase 1 lands; Phase 4 requires both
 |-------------|-------|------|----------------|
 | Domain types | `core` | `domain/` | Done |
 | Power Listener port | `core` | `ports/power.rs` | Done |
-| Power Listener adapter | `platform-linux` | `power/listener.rs`, `upower.rs`, `sysfs_fallback.rs` | 2 |
+| Power Listener adapter | `platform-linux` | `power/listener.rs`, `upower.rs`, `sysfs_fallback.rs`, `mod.rs` | Done |
 | Overlay Renderer port | `core` | `ports/overlay.rs` | Done |
 | Overlay Renderer adapter | `platform-linux` | `overlay/wgpu_shimmer.rs`, `x11_click_through.rs` | 3 |
 | Shimmer Orchestrator | `core` | `services/shimmer_orchestrator.rs`, `services/policy.rs` | Done |
@@ -202,13 +200,15 @@ Phases 2 and 3 can proceed in parallel once Phase 1 lands; Phase 4 requires both
 
 ## Suggested next step
 
-**Phase 2 and Phase 3 in parallel:** Phase 1 is complete — the core brain runs entirely on mock ports. Next slices:
+**Phase 2 is complete.** Next slices:
 
-- **Phase 2:** `UpowerBackend` + sysfs fallback + debounce coalescing
 - **Phase 3:** X11 click-through + `WgpuShimmerRenderer` implementing `OverlayRenderer`
+- **Phase 4:** App wiring — `LinuxPowerBackend::select()` + orchestrator daemon loop, CLI, tray
 
 ```bash
 cargo test -p power-shimmer-core
 cargo test -p power-shimmer-platform-linux
+# Manual smoke (hardware / UPower):
+cargo test -p power-shimmer-platform-linux linux_power_smoke -- --ignored --nocapture
 ./scripts/check.sh
 ```

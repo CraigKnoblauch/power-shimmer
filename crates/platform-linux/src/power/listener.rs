@@ -3,7 +3,7 @@
 use std::sync::mpsc;
 use std::sync::Arc;
 use std::thread;
-use std::time::Duration;
+use std::time::{Duration, Instant};
 
 use power_shimmer_core::{PowerEvent, PowerEventListener, PowerEventStream, PowerListenerError};
 
@@ -58,10 +58,26 @@ where
             }
 
             let mut current = initial;
-            while let Some(online) = backend.wait_online_change() {
+            while backend.wait_online_change().is_some() {
                 if debounce > Duration::ZERO {
-                    thread::sleep(debounce);
+                    let mut quiet_until = Instant::now() + debounce;
+                    loop {
+                        let now = Instant::now();
+                        if now >= quiet_until {
+                            break;
+                        }
+                        let remaining = quiet_until.saturating_duration_since(now);
+                        if backend.try_wait_online_change(remaining).is_some() {
+                            quiet_until = Instant::now() + debounce;
+                        } else {
+                            break;
+                        }
+                    }
                 }
+
+                let Some(online) = backend.read_online() else {
+                    continue;
+                };
 
                 let next = source_from_online(online);
                 if next == current {
@@ -85,24 +101,44 @@ where
 
 #[cfg(test)]
 mod tests {
-    use std::collections::VecDeque;
-    use std::sync::Mutex;
+    use std::sync::mpsc;
+    use std::sync::{Arc, Mutex};
+    use std::thread;
 
     use super::*;
     use power_shimmer_core::{PowerEvent, PowerSource, StreamRecvResult};
 
     struct MockPowerBackend {
         initial: PowerSource,
-        changes: Mutex<VecDeque<bool>>,
+        online: Arc<Mutex<Option<bool>>>,
+        change_rx: Mutex<mpsc::Receiver<()>>,
     }
 
     impl MockPowerBackend {
         fn on_battery_then_plug_ac() -> Self {
-            let mut changes = VecDeque::new();
-            changes.push_back(true);
+            Self::with_sequence(PowerSource::Battery, Some(false), vec![true])
+        }
+
+        fn with_sequence(
+            initial: PowerSource,
+            start_online: Option<bool>,
+            sequence: Vec<bool>,
+        ) -> Self {
+            let (change_tx, change_rx) = mpsc::channel();
+            let online = Arc::new(Mutex::new(start_online));
+            let online_for_thread = Arc::clone(&online);
+
+            thread::spawn(move || {
+                for value in sequence {
+                    *online_for_thread.lock().unwrap() = Some(value);
+                    let _ = change_tx.send(());
+                }
+            });
+
             Self {
-                initial: PowerSource::Battery,
-                changes: Mutex::new(changes),
+                initial,
+                online,
+                change_rx: Mutex::new(change_rx),
             }
         }
     }
@@ -112,8 +148,33 @@ mod tests {
             self.initial
         }
 
-        fn wait_online_change(&self) -> Option<bool> {
-            self.changes.lock().unwrap().pop_front()
+        fn wait_online_change(&self) -> Option<()> {
+            self.change_rx.lock().unwrap().recv().ok()
+        }
+
+        fn read_online(&self) -> Option<bool> {
+            *self.online.lock().expect("online mutex poisoned")
+        }
+
+        fn try_wait_online_change(&self, timeout: Duration) -> Option<()> {
+            self.change_rx
+                .lock()
+                .unwrap()
+                .recv_timeout(timeout)
+                .ok()
+        }
+    }
+
+    fn recv_event(
+        stream: &PowerEventStream,
+        timeout: Duration,
+        label: &str,
+    ) -> PowerEvent {
+        match stream.recv_timeout(timeout) {
+            StreamRecvResult::Message(Ok(event)) => event,
+            StreamRecvResult::Message(Err(error)) => panic!("{label} error: {error}"),
+            StreamRecvResult::Timeout => panic!("timed out waiting for {label}"),
+            StreamRecvResult::Disconnected => panic!("stream ended before {label}"),
         }
     }
 
@@ -131,25 +192,125 @@ mod tests {
             }
         };
 
-        let first = match stream.recv_timeout(Duration::from_secs(1)) {
-            StreamRecvResult::Message(Ok(event)) => event,
-            StreamRecvResult::Message(Err(error)) => panic!("initial event error: {error}"),
-            StreamRecvResult::Timeout => panic!("timed out waiting for initial event"),
-            StreamRecvResult::Disconnected => panic!("stream ended before initial event"),
-        };
-        handle_event(first);
-
-        let second = match stream.recv_timeout(Duration::from_secs(1)) {
-            StreamRecvResult::Message(Ok(event)) => event,
-            StreamRecvResult::Message(Err(error)) => panic!("transition event error: {error}"),
-            StreamRecvResult::Timeout => panic!("timed out waiting for battery→AC transition"),
-            StreamRecvResult::Disconnected => panic!("stream ended before transition"),
-        };
-        handle_event(second);
+        handle_event(recv_event(
+            &stream,
+            Duration::from_secs(1),
+            "initial event",
+        ));
+        handle_event(recv_event(
+            &stream,
+            Duration::from_secs(1),
+            "battery→AC transition",
+        ));
 
         assert_eq!(
             battery_to_ac_handler_count, 1,
             "handler must run exactly once for Battery→AC"
+        );
+    }
+
+    #[test]
+    fn debounce_coalesces_rapid_flicker_into_single_transition() {
+        let listener = LinuxPowerListener::new(MockPowerBackend::with_sequence(
+            PowerSource::Battery,
+            Some(false),
+            vec![true, false, true],
+        ))
+        .with_debounce(Duration::from_millis(50));
+
+        let stream = listener.subscribe().expect("subscribe should succeed");
+
+        let initial = recv_event(&stream, Duration::from_secs(1), "initial event");
+        assert_eq!(
+            initial,
+            PowerEvent::InitialState {
+                source: PowerSource::Battery
+            }
+        );
+
+        let transition = recv_event(
+            &stream,
+            Duration::from_secs(1),
+            "coalesced transition",
+        );
+        assert_eq!(
+            transition,
+            PowerEvent::Transition {
+                from: PowerSource::Battery,
+                to: PowerSource::Ac,
+            }
+        );
+
+        match stream.recv_timeout(Duration::from_millis(100)) {
+            StreamRecvResult::Timeout => {}
+            StreamRecvResult::Message(Ok(event)) => {
+                panic!("expected one coalesced transition, got extra event: {event:?}")
+            }
+            StreamRecvResult::Message(Err(error)) => panic!("unexpected stream error: {error}"),
+            StreamRecvResult::Disconnected => {}
+        }
+    }
+
+    #[test]
+    fn unknown_resolves_via_transition_without_panic() {
+        struct UnknownThenBatteryBackend {
+            online: Arc<Mutex<Option<bool>>>,
+            change_rx: Mutex<mpsc::Receiver<()>>,
+        }
+
+        impl PowerSourceBackend for UnknownThenBatteryBackend {
+            fn initial_source(&self) -> PowerSource {
+                PowerSource::Unknown
+            }
+
+            fn wait_online_change(&self) -> Option<()> {
+                self.change_rx.lock().unwrap().recv().ok()
+            }
+
+            fn read_online(&self) -> Option<bool> {
+                *self.online.lock().unwrap()
+            }
+
+            fn try_wait_online_change(&self, timeout: Duration) -> Option<()> {
+                self.change_rx
+                    .lock()
+                    .unwrap()
+                    .recv_timeout(timeout)
+                    .ok()
+            }
+        }
+
+        let (change_tx, change_rx) = mpsc::channel();
+        let online = Arc::new(Mutex::new(None));
+        let online_for_thread = Arc::clone(&online);
+
+        thread::spawn(move || {
+            thread::sleep(Duration::from_millis(10));
+            *online_for_thread.lock().unwrap() = Some(false);
+            let _ = change_tx.send(());
+        });
+
+        let listener = LinuxPowerListener::new(UnknownThenBatteryBackend {
+            online,
+            change_rx: Mutex::new(change_rx),
+        })
+        .with_debounce(Duration::ZERO);
+
+        let stream = listener.subscribe().expect("subscribe should succeed");
+
+        assert_eq!(
+            recv_event(&stream, Duration::from_secs(1), "initial event"),
+            PowerEvent::InitialState {
+                source: PowerSource::Unknown
+            }
+        );
+
+        assert_eq!(
+            recv_event(&stream, Duration::from_secs(1), "resolution transition"),
+            PowerEvent::Transition {
+                from: PowerSource::Unknown,
+                to: PowerSource::Battery,
+            }
         );
     }
 }
