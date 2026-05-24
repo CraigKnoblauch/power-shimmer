@@ -2,21 +2,35 @@
 
 use std::sync::mpsc;
 use std::thread;
+use std::time::Duration;
 
 use crate::domain::{PowerEvent, PowerListenerError};
 use crate::ports::{PowerEventListener, PowerEventStream};
 
 /// Injects a predetermined sequence of power events for orchestrator tests.
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub struct MockPowerEventListener {
     events: Vec<PowerEvent>,
+    keep_alive: bool,
 }
 
 impl MockPowerEventListener {
     /// Creates a listener that emits `events` in order, then closes the stream.
     #[must_use]
     pub fn new(events: Vec<PowerEvent>) -> Self {
-        Self { events }
+        Self {
+            events,
+            keep_alive: false,
+        }
+    }
+
+    /// Keeps the subscription open after emitting `events` until the stream is dropped.
+    #[must_use]
+    pub fn keep_alive_after_events(events: Vec<PowerEvent>) -> Self {
+        Self {
+            events,
+            keep_alive: true,
+        }
     }
 }
 
@@ -24,11 +38,18 @@ impl PowerEventListener for MockPowerEventListener {
     fn subscribe(&self) -> Result<PowerEventStream, PowerListenerError> {
         let (tx, rx) = mpsc::channel();
         let events = self.events.clone();
+        let keep_alive = self.keep_alive;
 
         let worker = thread::spawn(move || {
             for event in events {
                 if tx.send(Ok(event)).is_err() {
-                    break;
+                    return;
+                }
+            }
+
+            if keep_alive {
+                loop {
+                    thread::sleep(Duration::from_secs(3600));
                 }
             }
         });

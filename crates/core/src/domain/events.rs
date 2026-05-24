@@ -15,9 +15,17 @@ pub enum PowerSource {
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum PowerEvent {
     /// Emitted once when the listener starts, before any transition events.
-    InitialState { source: PowerSource },
+    InitialState {
+        /// Observed power source at subscription time.
+        source: PowerSource,
+    },
     /// Emitted when the active power source changes.
-    Transition { from: PowerSource, to: PowerSource },
+    Transition {
+        /// Previous power source.
+        from: PowerSource,
+        /// New power source.
+        to: PowerSource,
+    },
 }
 
 impl PowerEvent {
@@ -68,14 +76,19 @@ impl Default for ShimmerConfig {
 /// Distinguishes automatic vs user-initiated plays (logging/metrics only).
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum ShimmerTrigger {
+    /// Automatic play after a Battery→AC power transition.
     PowerTransition,
+    /// User-initiated play from the system tray.
     Manual,
+    /// User-initiated play from the CLI `--trigger` flag.
     Cli,
 }
 
 /// A single play invocation.
 #[derive(Debug, Clone, PartialEq)]
 pub struct ShimmerRequest {
+    /// Visual parameters for this play.
     pub config: ShimmerConfig,
+    /// What caused this play (logging/metrics only).
     pub trigger: ShimmerTrigger,
 }

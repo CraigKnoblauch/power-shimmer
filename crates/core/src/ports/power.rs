@@ -14,7 +14,23 @@ pub trait PowerEventListener: Send + Sync {
     /// 1. Query current power source.
     /// 2. Emit [`PowerEvent::InitialState`].
     /// 3. Emit [`PowerEvent::Transition`] on each subsequent change.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`PowerListenerError::SubscribeFailed`] when the adapter cannot
+    /// begin the OS subscription.
     fn subscribe(&self) -> Result<PowerEventStream, PowerListenerError>;
+}
+
+/// Result of a timed receive on [`PowerEventStream`].
+#[derive(Debug)]
+pub enum StreamRecvResult {
+    /// An event (or adapter error) was received.
+    Message(Result<PowerEvent, PowerListenerError>),
+    /// No event arrived before the timeout elapsed.
+    Timeout,
+    /// The sender disconnected and the stream will deliver no further events.
+    Disconnected,
 }
 
 /// Subscription handle; dropping cancels the OS subscription.
@@ -45,14 +61,11 @@ impl PowerEventStream {
 
     /// Receives the next event, waiting at most `timeout`.
     #[must_use]
-    pub fn recv_timeout(
-        &self,
-        timeout: Duration,
-    ) -> Result<Option<Result<PowerEvent, PowerListenerError>>, mpsc::RecvTimeoutError> {
+    pub fn recv_timeout(&self, timeout: Duration) -> StreamRecvResult {
         match self.receiver.recv_timeout(timeout) {
-            Ok(event) => Ok(Some(event)),
-            Err(mpsc::RecvTimeoutError::Timeout) => Ok(None),
-            Err(mpsc::RecvTimeoutError::Disconnected) => Ok(None),
+            Ok(event) => StreamRecvResult::Message(event),
+            Err(mpsc::RecvTimeoutError::Timeout) => StreamRecvResult::Timeout,
+            Err(mpsc::RecvTimeoutError::Disconnected) => StreamRecvResult::Disconnected,
         }
     }
 }

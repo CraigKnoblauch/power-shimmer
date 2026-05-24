@@ -14,5 +14,6 @@ pub use domain::{
     MonitorTarget, OrchestratorConfig, OrchestratorError, OverlapPolicy, OverlayError, PowerEvent,
     PowerListenerError, PowerSource, ShimmerConfig, ShimmerRequest, ShimmerTrigger,
 };
-pub use ports::{OverlayRenderer, PowerEventListener, PowerEventStream};
+pub use ports::{OverlayRenderer, PowerEventListener, PowerEventStream, StreamRecvResult};
+pub use services::{should_auto_play, ShimmerOrchestrator};
 pub use testing::{MockOverlayRenderer, MockPowerEventListener};

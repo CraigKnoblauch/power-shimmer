@@ -89,7 +89,7 @@ mod tests {
     use std::sync::Mutex;
 
     use super::*;
-    use power_shimmer_core::{PowerEvent, PowerSource};
+    use power_shimmer_core::{PowerEvent, PowerSource, StreamRecvResult};
 
     struct MockPowerBackend {
         initial: PowerSource,
@@ -131,18 +131,20 @@ mod tests {
             }
         };
 
-        let first = stream
-            .recv_timeout(Duration::from_secs(1))
-            .expect("timed out waiting for initial event")
-            .expect("stream ended")
-            .expect("initial event error");
+        let first = match stream.recv_timeout(Duration::from_secs(1)) {
+            StreamRecvResult::Message(Ok(event)) => event,
+            StreamRecvResult::Message(Err(error)) => panic!("initial event error: {error}"),
+            StreamRecvResult::Timeout => panic!("timed out waiting for initial event"),
+            StreamRecvResult::Disconnected => panic!("stream ended before initial event"),
+        };
         handle_event(first);
 
-        let second = stream
-            .recv_timeout(Duration::from_secs(1))
-            .expect("timed out waiting for battery→AC transition")
-            .expect("stream ended before transition")
-            .expect("transition event error");
+        let second = match stream.recv_timeout(Duration::from_secs(1)) {
+            StreamRecvResult::Message(Ok(event)) => event,
+            StreamRecvResult::Message(Err(error)) => panic!("transition event error: {error}"),
+            StreamRecvResult::Timeout => panic!("timed out waiting for battery→AC transition"),
+            StreamRecvResult::Disconnected => panic!("stream ended before transition"),
+        };
         handle_event(second);
 
         assert_eq!(

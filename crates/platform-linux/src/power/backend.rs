@@ -1,4 +1,4 @@
-//! Injectable power source backends (UPower, sysfs, test doubles).
+//! Injectable power source backends (`UPower`, sysfs, test doubles).
 
 use power_shimmer_core::PowerSource;
 
