@@ -28,6 +28,10 @@ clap = { version = "=4.5.37", features = ["derive"] }
 zbus = { version = "5", default-features = false, features = ["tokio"] }
 winit = "0.30"
 wgpu = "23"
+raw-window-handle = "0.6"
+bytemuck = { version = "1", features = ["derive"] }
+pollster = "0.4"
+x11rb = { version = "0.13", default-features = false, features = ["shape"] }
 tray-icon = "0.19"
 
 [workspace.lints.rust]

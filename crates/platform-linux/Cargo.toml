@@ -11,9 +11,18 @@ repository.workspace = true
 [dependencies]
 power-shimmer-core = { path = "../core" }
 futures-lite = "2"
-tokio = { workspace = true }
+tokio = { workspace = true, features = ["sync", "time"] }
 tracing = { workspace = true }
 zbus = { workspace = true }
+winit = { workspace = true, default-features = false, features = ["x11", "rwh_06"] }
+wgpu = { workspace = true }
+raw-window-handle = { workspace = true }
+bytemuck = { workspace = true }
+pollster = { workspace = true }
+x11rb = { workspace = true }
+
+[dev-dependencies]
+tokio = { workspace = true, features = ["macros", "rt-multi-thread", "time"] }
 
 [features]
 default = []

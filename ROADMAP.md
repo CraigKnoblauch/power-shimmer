@@ -36,13 +36,15 @@ A laptop on **Linux (X11 + UPower)** can run `power-shimmer` as a background uti
 | 400 ms debounce coalescing | Done | Trailing-edge coalesce in `listener.rs`; unit test `debounce_coalesces_rapid_flicker_into_single_transition` |
 | `MockPowerEventListener` (core) | Done | `core::testing::mock_power.rs`; injects `Vec<PowerEvent>` |
 | `MockOverlayRenderer` (core) | Done | `core::testing::mock_overlay.rs`; `play_calls`, delay, `cancel()` → `Cancelled` |
-| Overlay (X11 + wgpu) | Not started | `wgpu_shimmer.rs`, `x11_click_through.rs` stubs |
+| Overlay (X11 + wgpu) | Done | `WgpuShimmerRenderer`; `wgpu_shimmer.rs`, `render_loop.rs`, `session.rs`, `shader.rs`, `x11_click_through.rs`; winit **X11-only**; `assets/shaders/shimmer.wgsl` |
+| Overlay adapter tests | Done | Session + shader unit tests; `cancel_when_idle`; GPU/X11 tests `#[ignore]` in `wgpu_shimmer.rs` |
+| Overlay X11 smoke test | Wired, ignored | `tests/overlay_x11_smoke.rs`; run with `--ignored` on X11 + GPU |
 | App (CLI, tray, wiring, config) | Not started | `main` prints placeholder message |
 | Orchestrator unit tests (SPEC table) | Done | All 8 SPEC rows + shutdown in `orchestrator_test.rs` |
 | Mock overlay unit tests (SPEC) | Done | `is_playing`, `Cancelled`, completion covered in `mock_overlay.rs` unit tests |
 | Linux power smoke test | Wired, ignored | `linux_power_smoke.rs` uses `LinuxPowerBackend::select()`; run with `--ignored` on hardware |
 
-**Reference implementation today:** `cargo test -p power-shimmer-core` — **20 tests green** (policy, mocks, full orchestrator SPEC table). `cargo test -p power-shimmer-platform-linux` — **8 tests green** (listener debounce, sysfs hermetic tests, UPower startup). Phase 1 and **Phase 2 complete**. Production power path: `LinuxPowerBackend::select()` → `LinuxPowerListener` → normalized `PowerEvent` stream.
+**Reference implementation today:** `cargo test -p power-shimmer-core` — **20 tests green** (policy, mocks, full orchestrator SPEC table). `cargo test -p power-shimmer-platform-linux` — **16 tests green**, 3 ignored (2 GPU/X11 unit tests + overlay smoke + power smoke). Phases **1–3 complete** (overlay not yet wired in app). Production paths: power `LinuxPowerBackend::select()` → `LinuxPowerListener`; overlay `WgpuShimmerRenderer` (X11 + wgpu, Wayland deferred v1.1).
 
 ---
 
@@ -62,8 +64,6 @@ flowchart TD
         F[UPower PowerSourceBackend]
         G[sysfs fallback]
         H[Debounce + adapter tests]
-    end
-    subgraph p3 [Phase 3 — Overlay]
         J[X11 window + click-through]
         K[wgpu shader + play/cancel]
     end
@@ -81,7 +81,7 @@ flowchart TD
     L --> M --> N --> O
 ```
 
-Phases 2 and 3 can proceed in parallel once Phase 1 lands; Phase 4 requires both. **Phase 2 is complete** — proceed with Phase 3 (overlay) and Phase 4 (app wiring).
+Phases 2 and 3 can proceed in parallel once Phase 1 lands; Phase 4 requires both. **Phases 2 and 3 are complete** — proceed with Phase 4 (app wiring, CLI, tray, end-to-end `--trigger`).
 
 ---
 
@@ -126,18 +126,18 @@ Phases 2 and 3 can proceed in parallel once Phase 1 lands; Phase 4 requires both
 
 **Objective:** Satisfy `OverlayRenderer` for primary monitor on X11. **Wayland deferred to v1.1.**
 
-| # | Task | SPEC / files | Acceptance |
-|---|------|----------------|------------|
-| 3.1 | Add workspace deps to `platform-linux` | `Cargo.toml` | `tokio`, `winit`, `wgpu` per TECH_STACK |
-| 3.2 | X11 click-through + window hints | `overlay/x11_click_through.rs` | No focus; pass-through input; hidden from taskbar (best effort) |
-| 3.3 | Primary monitor bounds | Visual contract | Full primary display coverage |
-| 3.4 | `WgpuShimmerRenderer` implements `OverlayRenderer` | `overlay/wgpu_shimmer.rs` | `play` / `is_playing` / `cancel` |
-| 3.5 | WGSL rainbow + shimmer band | `assets/shaders/` | Honors `duration_ms`, `opacity`, `speed` ± one frame |
-| 3.6 | Teardown ≤ 500 ms | Module 3 | Resources released after complete or cancel |
-| 3.7 | Mock overlay unit tests in `core` or `platform-linux` | SPEC overlay tests | `is_playing`, `Cancelled`, completion | **Done** (core `mock_overlay.rs`) |
-| 3.8 | Manual test: `power-shimmer --trigger` | App (Phase 4) | Visible shimmer without power event |
+| # | Task | SPEC / files | Acceptance | Status |
+|---|------|----------------|------------|--------|
+| 3.1 | Add workspace deps to `platform-linux` | `Cargo.toml` | `tokio`, `winit`, `wgpu`, `x11rb`, `bytemuck`, `pollster`, `raw-window-handle` | **Done** |
+| 3.2 | X11 click-through + window hints | `overlay/x11_click_through.rs` | No focus; pass-through input; hidden from taskbar (best effort) | **Done** |
+| 3.3 | Primary monitor bounds | `overlay/render_loop.rs` | Full primary display coverage (borderless fullscreen) | **Done** |
+| 3.4 | `WgpuShimmerRenderer` implements `OverlayRenderer` | `overlay/wgpu_shimmer.rs` | `play` / `is_playing` / `cancel` | **Done** |
+| 3.5 | WGSL rainbow + shimmer band | `assets/shaders/shimmer.wgsl` | Honors `duration_ms`, `opacity`, `speed` ± one frame | **Done** |
+| 3.6 | Teardown ≤ 500 ms | `overlay/session.rs`, render loop | Resources released after complete or cancel | **Done** |
+| 3.7 | Mock overlay unit tests in `core` or `platform-linux` | SPEC overlay tests | `is_playing`, `Cancelled`, completion | **Done** (core `mock_overlay.rs` + adapter session/shader tests) |
+| 3.8 | Manual test: `power-shimmer --trigger` | App (Phase 4) | Visible shimmer without power event | **Pending** (Phase 4) |
 
-**Exit criteria:** Orchestrator + real overlay completes end-to-end on X11; `wayland_layer_shell.rs` remains stubbed.
+**Exit criteria:** Orchestrator + real overlay completes end-to-end on X11; `wayland_layer_shell.rs` remains stubbed. **Met** for adapter crate (pending Phase 4 composition root and manual `--trigger` / AC plug E2E).
 
 ---
 
@@ -191,7 +191,7 @@ Phases 2 and 3 can proceed in parallel once Phase 1 lands; Phase 4 requires both
 | Power Listener port | `core` | `ports/power.rs` | Done |
 | Power Listener adapter | `platform-linux` | `power/listener.rs`, `upower.rs`, `sysfs_fallback.rs`, `mod.rs` | Done |
 | Overlay Renderer port | `core` | `ports/overlay.rs` | Done |
-| Overlay Renderer adapter | `platform-linux` | `overlay/wgpu_shimmer.rs`, `x11_click_through.rs` | 3 |
+| Overlay Renderer adapter | `platform-linux` | `overlay/wgpu_shimmer.rs`, `render_loop.rs`, `session.rs`, `shader.rs`, `x11_click_through.rs` | Done |
 | Shimmer Orchestrator | `core` | `services/shimmer_orchestrator.rs`, `services/policy.rs` | Done |
 | Test doubles | `core` | `testing/mock_power.rs`, `testing/mock_overlay.rs` | Done |
 | CLI / tray / wiring | `app` | `main.rs`, `wiring.rs`, `tray.rs`, `config.rs` | 4 |
@@ -200,15 +200,16 @@ Phases 2 and 3 can proceed in parallel once Phase 1 lands; Phase 4 requires both
 
 ## Suggested next step
 
-**Phase 2 is complete.** Next slices:
+**Phases 2 and 3 are complete.** Next slice:
 
-- **Phase 3:** X11 click-through + `WgpuShimmerRenderer` implementing `OverlayRenderer`
-- **Phase 4:** App wiring — `LinuxPowerBackend::select()` + orchestrator daemon loop, CLI, tray
+- **Phase 4:** App wiring — `LinuxPowerBackend::select()` + `WgpuShimmerRenderer` + orchestrator daemon loop, CLI (`--trigger`), tray
 
 ```bash
 cargo test -p power-shimmer-core
 cargo test -p power-shimmer-platform-linux
-# Manual smoke (hardware / UPower):
+# Manual overlay (X11 DISPLAY + GPU):
+cargo test -p power-shimmer-platform-linux overlay_x11 -- --ignored --nocapture
+# Manual power (hardware / UPower):
 cargo test -p power-shimmer-platform-linux linux_power_smoke -- --ignored --nocapture
 ./scripts/check.sh
 ```
