@@ -8,6 +8,7 @@ use wgpu::{Instance, Surface};
 use winit::application::ApplicationHandler;
 use winit::event::WindowEvent;
 use winit::event_loop::{ActiveEventLoop, EventLoopProxy};
+use winit::monitor::MonitorHandle;
 use winit::window::{Fullscreen, Window, WindowAttributes, WindowId, WindowLevel};
 
 use super::session::{SessionController, SessionId};
@@ -96,10 +97,10 @@ impl OverlayApp {
             return;
         }
 
-        let Some(monitor) = event_loop.primary_monitor() else {
+        let Some(monitor) = select_target_monitor(event_loop) else {
             self.controller.finish_session();
             let _ = done.send(Err(OverlayError::WindowCreationFailed(
-                "no primary monitor".to_string(),
+                "no monitors available".to_string(),
             )));
             return;
         };
@@ -320,6 +321,16 @@ impl ApplicationHandler<OverlayUserEvent> for OverlayApp {
             session.window.request_redraw();
         }
     }
+}
+
+/// Picks the monitor for a full-screen overlay.
+///
+/// `primary_monitor()` is often `None` on XWayland even when displays exist; fall back
+/// to the first reported monitor in that case.
+fn select_target_monitor(event_loop: &ActiveEventLoop) -> Option<MonitorHandle> {
+    event_loop
+        .primary_monitor()
+        .or_else(|| event_loop.available_monitors().next())
 }
 
 /// Returns true when an X11 session is required and appears available.
