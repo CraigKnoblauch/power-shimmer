@@ -1,0 +1,3 @@
+# Project-specific Clippy configuration (see https://doc.rust-lang.org/clippy/configuration.html)
+msrv = "1.75"
+cognitive-complexity-threshold = 25

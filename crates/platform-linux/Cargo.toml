@@ -1,0 +1,22 @@
+[package]
+name = "power-shimmer-platform-linux"
+description = "Linux platform adapters for Power Shimmer (UPower, X11 overlay)"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+authors.workspace = true
+repository.workspace = true
+
+[dependencies]
+power-shimmer-core = { path = "../core" }
+# Approved adapter deps (see root Cargo.toml [workspace.dependencies]) are added
+# when power/overlay implementations land. They require a current Rust stable
+# toolchain (rustup); the system apt Rust 1.75 package is too old for wgpu/winit.
+
+[features]
+default = []
+wayland = []
+
+[lints]
+workspace = true

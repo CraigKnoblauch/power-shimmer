@@ -1,0 +1,29 @@
+# Rust / Cargo
+/target/
+**/*.rs.bk
+Cargo.lock
+
+# IDE / editor
+.idea/
+.vscode/
+*.swp
+*.swo
+*~
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Local config overrides (user-specific)
+config/local.toml
+.env
+.env.*
+
+# Test / coverage artifacts
+*.profraw
+coverage/
+lcov.info
+tarpaulin-report.html
+
+# cargo-deny / audit caches (if run locally)
+.deny/

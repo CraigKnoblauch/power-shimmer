@@ -1,0 +1,10 @@
+[orchestrator]
+auto_enabled = true
+dry_run = false
+overlap_policy = "skip"
+
+[orchestrator.shimmer]
+duration_ms = 2000
+opacity = 0.35
+speed = 1.0
+monitor = "primary"

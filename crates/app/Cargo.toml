@@ -1,0 +1,30 @@
+[package]
+name = "power-shimmer-app"
+description = "Power Shimmer desktop application (composition root)"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+authors.workspace = true
+repository.workspace = true
+
+[[bin]]
+name = "power-shimmer"
+path = "src/main.rs"
+
+[dependencies]
+power-shimmer-core = { path = "../core" }
+power-shimmer-platform-linux = { path = "../platform-linux", optional = true }
+power-shimmer-platform-windows = { path = "../platform-windows", optional = true }
+power-shimmer-platform-macos = { path = "../platform-macos", optional = true }
+# CLI/tray/runtime deps from [workspace.dependencies] are wired in during app
+# implementation (requires current Rust stable via rustup).
+
+[features]
+default = ["linux"]
+linux = ["dep:power-shimmer-platform-linux"]
+windows = ["dep:power-shimmer-platform-windows"]
+macos = ["dep:power-shimmer-platform-macos"]
+
+[lints]
+workspace = true

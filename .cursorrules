@@ -1,0 +1,8 @@
+Always operate in "Plan Mode" first. Do not generate full implementation code until the architecture, tech stack, and interfaces are explicitly approved by the user. Enforce strict single-responsibility principles and decoupled file structures.
+
+# Architectural Rules
+- Use strict Clean Architecture principles. 
+- Core logic must remain decoupled; never import third-party frameworks or databases directly into business logic.
+- Always use interface-driven development (Dependency Inversion).
+- Write comprehensive unit tests before generating implementations.
+- Keep components modular and strictly enforce Single Responsibility Principle (SRP).

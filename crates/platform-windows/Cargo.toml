@@ -1,0 +1,15 @@
+[package]
+name = "power-shimmer-platform-windows"
+description = "Windows platform adapters for Power Shimmer (stub)"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+authors.workspace = true
+repository.workspace = true
+
+[dependencies]
+power-shimmer-core = { path = "../core" }
+
+[lints]
+workspace = true

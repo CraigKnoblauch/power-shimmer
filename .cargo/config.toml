@@ -1,0 +1,10 @@
+[build]
+# Uncomment when the workspace builds cleanly with zero warnings:
+# rustflags = ["-Dwarnings"]
+
+[alias]
+xtask-test = "test --workspace --all-features"
+xtask-check = "check --workspace --all-targets"
+
+[target.x86_64-unknown-linux-gnu]
+# Linker flags for platform adapters can be added here when needed.

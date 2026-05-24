@@ -1,0 +1,51 @@
+[workspace]
+resolver = "2"
+members = [
+    "crates/core",
+    "crates/platform-linux",
+    "crates/platform-windows",
+    "crates/platform-macos",
+    "crates/app",
+]
+
+[workspace.package]
+version = "0.1.0"
+edition = "2021"
+rust-version = "1.75"
+license = "MIT OR Apache-2.0"
+repository = "https://github.com/your-org/power-shimmer"
+authors = ["Power Shimmer Contributors"]
+
+[workspace.dependencies]
+# Shared versions — use via `dependency = { workspace = true }` in member crates.
+thiserror = "1.0"
+tokio = { version = "1", features = ["macros", "rt-multi-thread", "sync", "time"] }
+tracing = "0.1"
+tracing-subscriber = { version = "0.3", features = ["env-filter"] }
+serde = { version = "1", features = ["derive"] }
+toml = "0.8"
+clap = { version = "=4.5.37", features = ["derive"] }
+zbus = { version = "5", default-features = false, features = ["tokio"] }
+winit = "0.30"
+wgpu = "23"
+tray-icon = "0.19"
+
+[workspace.lints.rust]
+unsafe_code = "forbid"
+missing_docs = "warn"
+unused_must_use = "deny"
+unused_crate_dependencies = "allow"
+
+[workspace.lints.clippy]
+all = { level = "warn", priority = -1 }
+pedantic = { level = "warn", priority = -1 }
+module_name_repetitions = "allow"
+must_use_candidate = "allow"
+
+[profile.dev]
+opt-level = 1
+
+[profile.release]
+lto = "thin"
+codegen-units = 1
+strip = true
