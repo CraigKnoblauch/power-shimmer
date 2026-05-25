@@ -4,15 +4,20 @@ use std::sync::Arc;
 use std::time::{Duration, Instant};
 
 use power_shimmer_core::{OverlayError, ShimmerRequest};
+use tracing::debug;
 use wgpu::{Instance, Surface};
 use winit::application::ApplicationHandler;
+use winit::dpi::PhysicalSize;
 use winit::event::WindowEvent;
 use winit::event_loop::{ActiveEventLoop, EventLoopProxy};
 use winit::monitor::MonitorHandle;
 use winit::platform::x11::WindowAttributesExtX11;
 use winit::window::{Fullscreen, Window, WindowAttributes, WindowId, WindowLevel};
 
-use super::overlay_hint_policy::{overlay_x11_window_types, wm_state_hints_apply_after_show};
+use super::overlay_hint_policy::{
+    overlay_x11_window_types, surface_configure_after_show,
+    surface_reconfigure_on_resized_event, wm_state_hints_apply_after_show,
+};
 use super::session::{SessionController, SessionId};
 use super::shader::{self, ShimmerParams, ShimmerPipeline};
 use super::x11_click_through;
@@ -40,6 +45,8 @@ struct GpuSession {
     device: wgpu::Device,
     queue: wgpu::Queue,
     pipeline: ShimmerPipeline,
+    /// Primary monitor physical size — fallback when pre-map `inner_size` is still small.
+    monitor_size: PhysicalSize<u32>,
     request: ShimmerRequest,
     session_id: SessionId,
     started: Instant,
@@ -70,6 +77,31 @@ impl OverlayApp {
 }
 
 impl OverlayApp {
+    fn reconfigure_surface(session: &mut GpuSession) {
+        let (width, height) =
+            effective_surface_size(&session.window, session.monitor_size);
+        if width == 0 || height == 0 {
+            return;
+        }
+        if session.config.width == width && session.config.height == height {
+            return;
+        }
+        session.config.width = width;
+        session.config.height = height;
+        session
+            .surface
+            .configure(&session.device, &session.config);
+        debug!(
+            width,
+            height,
+            inner_width = session.window.inner_size().width,
+            inner_height = session.window.inner_size().height,
+            monitor_width = session.monitor_size.width,
+            monitor_height = session.monitor_size.height,
+            "overlay surface reconfigured"
+        );
+    }
+
     fn finish_session(&mut self, result: Result<(), OverlayError>) {
         let Some(mut session) = self.gpu.take() else {
             self.controller.finish_session();
@@ -106,6 +138,7 @@ impl OverlayApp {
             )));
             return;
         };
+        let monitor_size = monitor.size();
 
         let attrs = WindowAttributes::default()
             .with_title("")
@@ -181,8 +214,8 @@ impl OverlayApp {
             .find(wgpu::TextureFormat::is_srgb)
             .unwrap_or(shader::surface_format());
 
-        let size = window.inner_size();
-        let mut config = shader::surface_config(size.width, size.height, format);
+        let (width, height) = effective_surface_size(&window, monitor_size);
+        let mut config = shader::surface_config(width, height, format);
         if caps
             .alpha_modes
             .contains(&wgpu::CompositeAlphaMode::PreMultiplied)
@@ -191,7 +224,10 @@ impl OverlayApp {
         } else if let Some(&mode) = caps.alpha_modes.first() {
             config.alpha_mode = mode;
         }
-        surface.configure(&device, &config);
+
+        if !surface_configure_after_show() {
+            surface.configure(&device, &config);
+        }
 
         let pipeline = ShimmerPipeline::new(&device, format, shader::SHADER_SOURCE);
 
@@ -199,20 +235,27 @@ impl OverlayApp {
         if wm_state_hints_apply_after_show() {
             x11_click_through::apply_taskbar_hiding_wm_state_best_effort(&window);
         }
-        window.request_redraw();
 
-        self.gpu = Some(GpuSession {
+        let mut session = GpuSession {
             window,
             surface,
             config,
             device,
             queue,
             pipeline,
+            monitor_size,
             request,
             session_id,
             started: Instant::now(),
             done: Some(done),
-        });
+        };
+
+        if surface_configure_after_show() {
+            Self::reconfigure_surface(&mut session);
+        }
+
+        session.window.request_redraw();
+        self.gpu = Some(session);
     }
 
     fn render_frame(&mut self, _event_loop: &ActiveEventLoop) {
@@ -232,15 +275,7 @@ impl OverlayApp {
             return;
         }
 
-        let size = session.window.inner_size();
-        if size.width > 0
-            && size.height > 0
-            && (session.config.width != size.width || session.config.height != size.height)
-        {
-            session.config.width = size.width;
-            session.config.height = size.height;
-            session.surface.configure(&session.device, &session.config);
-        }
+        Self::reconfigure_surface(session);
 
         let params = ShimmerParams::from_config(&session.request.config, elapsed.as_secs_f32());
         session.pipeline.write_uniforms(&session.queue, &params);
@@ -317,6 +352,22 @@ impl ApplicationHandler<OverlayUserEvent> for OverlayApp {
 
         match event {
             WindowEvent::RedrawRequested => self.render_frame(event_loop),
+            WindowEvent::Resized(size) if surface_reconfigure_on_resized_event() => {
+                if let Some(session) = self.gpu.as_mut() {
+                    if size.width > 0 && size.height > 0 {
+                        session.config.width = size.width;
+                        session.config.height = size.height;
+                        session
+                            .surface
+                            .configure(&session.device, &session.config);
+                        debug!(
+                            width = size.width,
+                            height = size.height,
+                            "overlay surface reconfigured (Resized)"
+                        );
+                    }
+                }
+            }
             WindowEvent::CloseRequested => self.finish_session(Err(OverlayError::Cancelled)),
             _ => {}
         }
@@ -337,6 +388,35 @@ fn select_target_monitor(event_loop: &ActiveEventLoop) -> Option<MonitorHandle> 
     event_loop
         .primary_monitor()
         .or_else(|| event_loop.available_monitors().next())
+}
+
+/// Picks surface dimensions: max of window `inner_size` and monitor size so pre-map defaults
+/// (e.g. winit 800×600) do not leave a quarter-screen buffer after borderless fullscreen.
+fn effective_surface_size(window: &Window, monitor_size: PhysicalSize<u32>) -> (u32, u32) {
+    let inner = window.inner_size();
+    (
+        inner.width.max(monitor_size.width),
+        inner.height.max(monitor_size.height),
+    )
+}
+
+#[cfg(test)]
+mod tests {
+    use winit::dpi::PhysicalSize;
+
+    /// Mirrors [`effective_surface_size`] — pre-map 800×600 must expand to monitor bounds.
+    #[test]
+    fn effective_surface_size_uses_monitor_when_inner_is_default_small() {
+        let inner = PhysicalSize::new(800, 600);
+        let monitor = PhysicalSize::new(1920, 1080);
+        assert_eq!(
+            (
+                inner.width.max(monitor.width),
+                inner.height.max(monitor.height),
+            ),
+            (1920, 1080)
+        );
+    }
 }
 
 /// Returns true when an X11 session is required and appears available.

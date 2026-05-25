@@ -1,7 +1,9 @@
-//! Testable X11 overlay hint policy for taskbar/pager exclusion.
+//! Testable X11 overlay policy (taskbar hiding + full-screen geometry).
 //!
 //! Production overlay code must satisfy the contracts asserted in [`tests`].
-//! See `notes/issues/overlay-taskbar-icon-during-animation.md`.
+//!
+//! - `notes/issues/overlay-taskbar-icon-during-animation.md`
+//! - `notes/issues/overlay-quarter-screen-regression.md`
 
 use winit::platform::x11::WindowType;
 
@@ -20,16 +22,33 @@ pub const fn wm_state_hints_apply_after_show() -> bool {
     true
 }
 
-/// `_NET_WM_WINDOW_TYPE` values for the transient overlay (via `WindowAttributesExtX11`).
+/// `_NET_WM_WINDOW_TYPE` for the transient overlay (`WindowAttributesExtX11`).
+///
+/// Must **not** include [`WindowType::Notification`] — WMs size notification clients as
+/// small bubbles, which regressed full-monitor coverage (see quarter-screen issue note).
 #[must_use]
 pub fn overlay_x11_window_types() -> Vec<WindowType> {
-    vec![WindowType::Notification]
+    vec![WindowType::Normal]
+}
+
+/// When `true`, the wgpu surface is configured (or reconfigured) after `set_visible(true)` so
+/// `inner_size` reflects borderless fullscreen on the primary monitor.
+#[must_use]
+pub const fn surface_configure_after_show() -> bool {
+    true
+}
+
+/// When `true`, `OverlayApp` handles [`winit::event::WindowEvent::Resized`] and reconfigures the surface.
+#[must_use]
+pub const fn surface_reconfigure_on_resized_event() -> bool {
+    true
 }
 
 #[cfg(test)]
 mod tests {
     use super::{
-        overlay_x11_window_types, taskbar_hiding_net_wm_state_atoms,
+        overlay_x11_window_types, surface_configure_after_show,
+        surface_reconfigure_on_resized_event, taskbar_hiding_net_wm_state_atoms,
         wm_state_hints_apply_after_show as policy_wm_state_hints_apply_after_show,
     };
     use winit::platform::x11::WindowType;
@@ -55,11 +74,32 @@ mod tests {
     }
 
     #[test]
-    fn overlay_uses_notification_window_type() {
+    fn fullscreen_overlay_uses_normal_window_type() {
+        let types = overlay_x11_window_types();
+        assert!(
+            !types.contains(&WindowType::Notification),
+            "Notification window type causes quarter-screen draw on laptops; use Normal + SKIP_TASKBAR"
+        );
         assert_eq!(
-            overlay_x11_window_types(),
-            vec![WindowType::Notification],
-            "overlay must use Notification window type to avoid taskbar listing"
+            types,
+            vec![WindowType::Normal],
+            "full-screen overlay must use Normal so WM honors borderless fullscreen sizing"
+        );
+    }
+
+    #[test]
+    fn surface_configure_after_show_for_fullscreen() {
+        assert!(
+            surface_configure_after_show(),
+            "wgpu surface must be configured after set_visible so inner_size matches the monitor"
+        );
+    }
+
+    #[test]
+    fn surface_reconfigures_on_resized_event() {
+        assert!(
+            surface_reconfigure_on_resized_event(),
+            "OverlayApp must handle Resized to pick up post-fullscreen geometry"
         );
     }
 }

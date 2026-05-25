@@ -1,6 +1,7 @@
 //! Linux overlay rendering adapters.
 
 mod overlay_hint_policy;
+mod overlay_session_policy;
 mod render_loop;
 mod session;
 mod shader;
