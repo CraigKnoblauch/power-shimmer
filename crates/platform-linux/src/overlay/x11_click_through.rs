@@ -83,9 +83,31 @@ fn set_skip_taskbar(conn: &RustConnection, root: u32, window: u32) -> Result<(),
     Ok(())
 }
 
+/// Number of `_NET_WM_STATE` ADD messages [`set_skip_taskbar`] sends (test contract).
+#[cfg(test)]
+#[must_use]
+pub(crate) fn set_skip_taskbar_message_count() -> usize {
+    1
+}
+
 /// Applies hints and logs warnings instead of failing the session.
 pub fn apply_x11_overlay_hints_best_effort(window: &Window) {
     if let Err(error) = apply_x11_overlay_hints(window) {
         warn!(%error, "X11 overlay hints failed (click-through may be incomplete)");
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::set_skip_taskbar_message_count;
+    use crate::overlay::overlay_hint_policy::taskbar_hiding_net_wm_state_atoms;
+
+    #[test]
+    fn set_skip_taskbar_applies_all_policy_atoms() {
+        assert_eq!(
+            set_skip_taskbar_message_count(),
+            taskbar_hiding_net_wm_state_atoms().len(),
+            "set_skip_taskbar must send one _NET_WM_STATE ADD per policy atom"
+        );
     }
 }
