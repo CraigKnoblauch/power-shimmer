@@ -7,31 +7,23 @@ use winit::platform::x11::WindowType;
 
 /// EWMH `_NET_WM_STATE` property names applied to hide the overlay from taskbar and pager.
 ///
-/// # Implementation note
-///
-/// `x11_click_through::set_skip_taskbar` must send one `_NET_WM_STATE` ADD
+/// `x11_click_through::apply_taskbar_hiding_wm_state` sends one `_NET_WM_STATE` ADD
 /// [`ClientMessage`](x11rb::protocol::xproto::ClientMessageEvent) per entry.
 #[must_use]
-#[allow(dead_code)] // wired by overlay impl in follow-up; tests assert contract
 pub fn taskbar_hiding_net_wm_state_atoms() -> &'static [&'static str] {
-    &[
-        "_NET_WM_STATE_SKIP_TASKBAR",
-        "_NET_WM_STATE_SKIP_PAGER",
-    ]
+    &["_NET_WM_STATE_SKIP_TASKBAR", "_NET_WM_STATE_SKIP_PAGER"]
 }
 
 /// When `true`, WM-state hints (taskbar/pager) are applied only after the overlay window is shown/mapped.
 #[must_use]
-#[allow(dead_code)]
 pub const fn wm_state_hints_apply_after_show() -> bool {
-    false
+    true
 }
 
 /// `_NET_WM_WINDOW_TYPE` values for the transient overlay (via `WindowAttributesExtX11`).
 #[must_use]
-#[allow(dead_code)]
 pub fn overlay_x11_window_types() -> Vec<WindowType> {
-    vec![WindowType::Normal]
+    vec![WindowType::Notification]
 }
 
 #[cfg(test)]

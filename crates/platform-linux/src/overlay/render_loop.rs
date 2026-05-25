@@ -9,8 +9,10 @@ use winit::application::ApplicationHandler;
 use winit::event::WindowEvent;
 use winit::event_loop::{ActiveEventLoop, EventLoopProxy};
 use winit::monitor::MonitorHandle;
+use winit::platform::x11::WindowAttributesExtX11;
 use winit::window::{Fullscreen, Window, WindowAttributes, WindowId, WindowLevel};
 
+use super::overlay_hint_policy::{overlay_x11_window_types, wm_state_hints_apply_after_show};
 use super::session::{SessionController, SessionId};
 use super::shader::{self, ShimmerParams, ShimmerPipeline};
 use super::x11_click_through;
@@ -106,12 +108,13 @@ impl OverlayApp {
         };
 
         let attrs = WindowAttributes::default()
-            .with_title("Power Shimmer")
+            .with_title("")
             .with_transparent(true)
             .with_decorations(false)
             .with_active(false)
             .with_visible(false)
             .with_window_level(WindowLevel::AlwaysOnTop)
+            .with_x11_window_type(overlay_x11_window_types())
             .with_fullscreen(Some(Fullscreen::Borderless(Some(monitor))));
 
         let window = match event_loop.create_window(attrs) {
@@ -123,7 +126,7 @@ impl OverlayApp {
             }
         };
 
-        x11_click_through::apply_x11_overlay_hints_best_effort(&window);
+        x11_click_through::apply_x11_click_through_hints_best_effort(&window);
 
         let instance = Instance::new(wgpu::InstanceDescriptor {
             backends: wgpu::Backends::PRIMARY,
@@ -193,6 +196,9 @@ impl OverlayApp {
         let pipeline = ShimmerPipeline::new(&device, format, shader::SHADER_SOURCE);
 
         window.set_visible(true);
+        if wm_state_hints_apply_after_show() {
+            x11_click_through::apply_taskbar_hiding_wm_state_best_effort(&window);
+        }
         window.request_redraw();
 
         self.gpu = Some(GpuSession {

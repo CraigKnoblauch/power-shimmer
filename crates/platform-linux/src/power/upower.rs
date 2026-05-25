@@ -150,8 +150,13 @@ async fn run_upower_session(state: &SharedState) -> Result<(), String> {
     let (hint_tx, mut hint_rx) = tokio::sync::mpsc::unbounded_channel();
 
     subscribe_property_changes(&connection, UPOWER_SERVICE, UPOWER_PATH, hint_tx.clone()).await?;
-    subscribe_property_changes(&connection, UPOWER_SERVICE, DISPLAY_DEVICE_PATH, hint_tx.clone())
-        .await?;
+    subscribe_property_changes(
+        &connection,
+        UPOWER_SERVICE,
+        DISPLAY_DEVICE_PATH,
+        hint_tx.clone(),
+    )
+    .await?;
 
     for path in line_power_device_paths(&connection, UPOWER_SERVICE).await? {
         subscribe_property_changes(&connection, UPOWER_SERVICE, &path, hint_tx.clone()).await?;
@@ -211,11 +216,10 @@ async fn read_display_device_online(
     connection: &Connection,
     destination: &str,
 ) -> Result<Option<bool>, String> {
-    let properties =
-        match properties_proxy(connection, destination, DISPLAY_DEVICE_PATH).await {
-            Ok(proxy) => proxy,
-            Err(_) => return Ok(None),
-        };
+    let properties = match properties_proxy(connection, destination, DISPLAY_DEVICE_PATH).await {
+        Ok(proxy) => proxy,
+        Err(_) => return Ok(None),
+    };
     let interface =
         InterfaceName::try_from(UPOWER_DEVICE_INTERFACE).map_err(|error| error.to_string())?;
 
@@ -442,10 +446,7 @@ mod tests {
             .expect("session bus")
             .serve_at(UPOWER_PATH, MockUpowerRoot)
             .expect("serve root UPower object")
-            .serve_at(
-                DISPLAY_DEVICE_PATH,
-                MockDisplayDevice { on_battery: false },
-            )
+            .serve_at(DISPLAY_DEVICE_PATH, MockDisplayDevice { on_battery: false })
             .expect("serve DisplayDevice")
             .build()
             .await
@@ -511,8 +512,7 @@ mod tests {
             .get(device_interface, "OnBattery")
             .await
             .expect("DisplayDevice OnBattery");
-        let on_battery =
-            bool::try_from(on_battery_value).expect("OnBattery bool");
+        let on_battery = bool::try_from(on_battery_value).expect("OnBattery bool");
         assert!(
             !on_battery,
             "mock DisplayDevice must report on AC power (OnBattery=false)"

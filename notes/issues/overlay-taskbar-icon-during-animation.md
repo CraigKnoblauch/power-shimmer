@@ -1,6 +1,6 @@
 # Issue: Taskbar icon appears during overlay animation
 
-**Status:** Identified — not yet fixed  
+**Status:** Fixed (platform-linux X11 overlay)  
 **Severity:** Medium (visual/UX regression; does not break shimmer playback)  
 **Affected entry path:** Any path that plays the overlay (`--trigger`, daemon auto/manual shimmer)  
 **Not affected:** System tray icon (intentional, separate surface)
