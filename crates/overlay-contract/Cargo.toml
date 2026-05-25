@@ -1,0 +1,19 @@
+[package]
+name = "power-shimmer-overlay-contract"
+description = "Shared overlay placement contract types and integration test harness"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+authors.workspace = true
+repository.workspace = true
+
+[dependencies]
+power-shimmer-core = { path = "../core" }
+tokio = { workspace = true, features = ["time"] }
+
+[dev-dependencies]
+tokio = { workspace = true, features = ["macros", "rt-multi-thread", "time"] }
+
+[lints]
+workspace = true

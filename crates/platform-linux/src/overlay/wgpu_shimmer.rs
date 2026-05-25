@@ -6,6 +6,7 @@ use std::time::Duration;
 
 use power_shimmer_core::ports::OverlayRenderer;
 use power_shimmer_core::{OverlayError, ShimmerRequest};
+use power_shimmer_overlay_contract::OverlayPlacementProbe;
 use tokio::sync::oneshot;
 use tracing::error;
 use winit::event_loop::EventLoopProxy;
@@ -157,6 +158,16 @@ impl OverlayRenderer for WgpuShimmerRenderer {
         let _ = self.proxy.send_event(OverlayUserEvent::Cancel {
             session_id: SessionId::from_raw(id),
         });
+    }
+}
+
+impl OverlayPlacementProbe for WgpuShimmerRenderer {
+    fn last_placement(&self) -> Option<power_shimmer_overlay_contract::OverlayPlacement> {
+        self.controller.last_placement()
+    }
+
+    fn require_overlay_session(&self) -> Result<(), String> {
+        require_x11_session().map_err(|e| e.to_string())
     }
 }
 

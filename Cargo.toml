@@ -2,6 +2,7 @@
 resolver = "2"
 members = [
     "crates/core",
+    "crates/overlay-contract",
     "crates/platform-linux",
     "crates/platform-windows",
     "crates/platform-macos",

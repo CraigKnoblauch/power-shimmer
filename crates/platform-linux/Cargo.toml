@@ -10,6 +10,7 @@ repository.workspace = true
 
 [dependencies]
 power-shimmer-core = { path = "../core" }
+power-shimmer-overlay-contract = { path = "../overlay-contract" }
 futures-lite = "2"
 tokio = { workspace = true, features = ["sync", "time"] }
 tracing = { workspace = true }

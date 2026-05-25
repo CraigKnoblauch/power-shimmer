@@ -8,12 +8,14 @@ use wgpu::{Instance, Surface};
 use winit::application::ApplicationHandler;
 use winit::event::WindowEvent;
 use winit::event_loop::{ActiveEventLoop, EventLoopProxy};
-use winit::monitor::MonitorHandle;
-use winit::window::{Fullscreen, Window, WindowAttributes, WindowId, WindowLevel};
+use winit::window::{Window, WindowId};
 
 use super::session::{SessionController, SessionId};
 use super::shader::{self, ShimmerParams, ShimmerPipeline};
+use super::window_placement::prepare_overlay_window;
 use super::x11_click_through;
+
+pub use super::window_placement::require_x11_session;
 
 const FRAME_BUDGET: Duration = Duration::from_millis(16);
 /// User events delivered to the overlay thread's winit loop.
@@ -97,31 +99,15 @@ impl OverlayApp {
             return;
         }
 
-        let Some(monitor) = select_target_monitor(event_loop) else {
-            self.controller.finish_session();
-            let _ = done.send(Err(OverlayError::WindowCreationFailed(
-                "no monitors available".to_string(),
-            )));
-            return;
-        };
-
-        let attrs = WindowAttributes::default()
-            .with_title("Power Shimmer")
-            .with_transparent(true)
-            .with_decorations(false)
-            .with_active(false)
-            .with_visible(false)
-            .with_window_level(WindowLevel::AlwaysOnTop)
-            .with_fullscreen(Some(Fullscreen::Borderless(Some(monitor))));
-
-        let window = match event_loop.create_window(attrs) {
-            Ok(w) => Arc::new(w),
+        let (window, placement) = match prepare_overlay_window(event_loop, request.config.monitor) {
+            Ok(pair) => pair,
             Err(e) => {
                 self.controller.finish_session();
-                let _ = done.send(Err(OverlayError::WindowCreationFailed(e.to_string())));
+                let _ = done.send(Err(e));
                 return;
             }
         };
+        self.controller.record_placement(placement);
 
         x11_click_through::apply_x11_overlay_hints_best_effort(&window);
 
@@ -323,28 +309,3 @@ impl ApplicationHandler<OverlayUserEvent> for OverlayApp {
     }
 }
 
-/// Picks the monitor for a full-screen overlay.
-///
-/// `primary_monitor()` is often `None` on XWayland even when displays exist; fall back
-/// to the first reported monitor in that case.
-fn select_target_monitor(event_loop: &ActiveEventLoop) -> Option<MonitorHandle> {
-    event_loop
-        .primary_monitor()
-        .or_else(|| event_loop.available_monitors().next())
-}
-
-/// Returns true when an X11 session is required and appears available.
-pub fn require_x11_session() -> Result<(), OverlayError> {
-    if std::env::var_os("WAYLAND_DISPLAY").is_some() && std::env::var_os("DISPLAY").is_none() {
-        return Err(OverlayError::WindowCreationFailed(
-            "Wayland session detected; v1 overlay requires X11 (set DISPLAY or use XWayland)"
-                .to_string(),
-        ));
-    }
-    if std::env::var_os("DISPLAY").is_none() {
-        return Err(OverlayError::WindowCreationFailed(
-            "DISPLAY is not set; cannot create X11 overlay".to_string(),
-        ));
-    }
-    Ok(())
-}

@@ -1,7 +1,9 @@
 //! Overlay session lifecycle state (GPU-agnostic).
 
 use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
-use std::sync::Arc;
+use std::sync::{Arc, Mutex};
+
+use power_shimmer_overlay_contract::OverlayPlacement;
 
 /// Monotonic session identifier for cancel routing.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -38,7 +40,8 @@ pub struct SessionController {
     active_id: AtomicU64,
     playing: Arc<AtomicBool>,
     cancel_requested: Arc<AtomicBool>,
-    phase: Arc<std::sync::Mutex<SessionPhase>>,
+    phase: Arc<Mutex<SessionPhase>>,
+    last_placement: Arc<Mutex<Option<OverlayPlacement>>>,
 }
 
 impl SessionController {
@@ -50,8 +53,30 @@ impl SessionController {
             active_id: AtomicU64::new(0),
             playing: Arc::new(AtomicBool::new(false)),
             cancel_requested: Arc::new(AtomicBool::new(false)),
-            phase: Arc::new(std::sync::Mutex::new(SessionPhase::Idle)),
+            phase: Arc::new(Mutex::new(SessionPhase::Idle)),
+            last_placement: Arc::new(Mutex::new(None)),
         }
+    }
+
+    /// Last recorded overlay window vs monitor sizes (set when a session window is created).
+    #[must_use]
+    pub fn last_placement(&self) -> Option<OverlayPlacement> {
+        *self.last_placement
+            .lock()
+            .expect("last placement mutex poisoned")
+    }
+
+    /// Records placement after the overlay window is created.
+    pub fn record_placement(&self, placement: OverlayPlacement) {
+        *self.last_placement
+            .lock()
+            .expect("last placement mutex poisoned") = Some(placement);
+    }
+
+    fn clear_placement(&self) {
+        *self.last_placement
+            .lock()
+            .expect("last placement mutex poisoned") = None;
     }
 
     /// Shared atomic used for [`OverlayRenderer::is_playing`](power_shimmer_core::ports::OverlayRenderer::is_playing).
@@ -97,6 +122,7 @@ impl SessionController {
         self.active_id.store(0, Ordering::SeqCst);
         self.cancel_requested.store(false, Ordering::SeqCst);
         self.playing.store(false, Ordering::SeqCst);
+        self.clear_placement();
     }
 
     /// Active session id, or `0` when idle.
