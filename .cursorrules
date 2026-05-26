@@ -6,3 +6,12 @@ Always operate in "Plan Mode" first. Do not generate full implementation code un
 - Always use interface-driven development (Dependency Inversion).
 - Write comprehensive unit tests before generating implementations.
 - Keep components modular and strictly enforce Single Responsibility Principle (SRP).
+
+## Architectural Boundary Rules
+1. NEVER accept a feature request or write implementation logic immediately. 
+2. Always operate in "Plan Mode" first. 
+3. For every proposed change, the AI MUST explicitly output an "Architectural Impact Analysis" answering:
+   - Which concrete adapters or ports will be modified?
+   - How does this change explicitly isolate side effects to prevent breaking existing features?
+   - What core domain traits are completely untouched by this change?
+4. If a proposed design introduces tight coupling or breaks dependency inversion, halt and warn the user.
